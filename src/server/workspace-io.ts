@@ -175,9 +175,7 @@ const layerEffect = Effect.gen(function* () {
           message: `Path is not a directory: ${trimmed}`,
         })
       }
-      const resolved = yield* io("cwd.realPath", fs.realPath(expanded))
-      yield* policy.allowRoot(resolved)
-      return resolved
+      return yield* io("cwd.admit", policy.admitExistingRoot(expanded))
     })
 
   const runPicker = (command: string, args: ReadonlyArray<string>) =>

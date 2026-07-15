@@ -28,7 +28,7 @@ await writeFile(
   join(fixtureSkillDirectory, "SKILL.md"),
   "---\nname: e2e-skill\ndescription: isolated fixture\n---\n\n# E2E skill\n",
 )
-const fixturePluginDirectory = join(workspace, "e2e-plugin")
+const fixturePluginDirectory = join(fixtureRoot, "e2e-plugin")
 const fixturePluginSkillDirectory = join(fixturePluginDirectory, "skills", "plugin-skill")
 await mkdir(fixturePluginSkillDirectory, { recursive: true })
 await writeFile(

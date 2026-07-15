@@ -640,16 +640,16 @@ const PackagesLive = HttpApiBuilder.group(PiWebApi, "packages", (handlers) =>
     const path = yield* Path.Path
     const policy = yield* FileAccessPolicy
     const workspace = yield* WorkspaceIo
-    const authorizePackageSource = (cwd: string, action: PluginAction, source: string | undefined) => {
+    const admitLocalPackageInstall = (cwd: string, action: PluginAction, source: string | undefined) => {
       const normalized = source?.trim()
-      if (normalized === undefined || !isLocalPackageSource(normalized)) return Effect.void
+      if (action !== "install" || normalized === undefined || !isLocalPackageSource(normalized)) return Effect.void
       const target =
         normalized === "~"
           ? config.home
           : normalized.startsWith("~/")
             ? path.join(config.home, normalized.slice(2))
             : path.resolve(cwd, normalized)
-      return action === "install" ? policy.assertExisting(target) : policy.assertProspective(target)
+      return policy.admitExistingRoot(target)
     }
     return handlers
       .handle("plugins", ({ query }) =>
@@ -661,7 +661,7 @@ const PackagesLive = HttpApiBuilder.group(PiWebApi, "packages", (handlers) =>
       .handle("pluginAction", ({ payload }) =>
         workspace.validateCwd(payload.cwd).pipe(
           Effect.flatMap((cwd) =>
-            authorizePackageSource(cwd, payload.action, payload.source).pipe(
+            admitLocalPackageInstall(cwd, payload.action, payload.source).pipe(
               Effect.andThen(adapter.pluginAction(cwd, payload.action, payload.source, payload.scope)),
             ),
           ),

@@ -5,6 +5,7 @@ import { expect, test, type Page } from "@playwright/test"
 import pkg from "../../package.json" with { type: "json" }
 
 const fixtureWorkspace = resolve("test-results/e2e-fixture/workspace")
+const fixturePluginDirectory = resolve("test-results/e2e-fixture/e2e-plugin")
 const nonGitWorkspace = resolve(tmpdir(), "pi-web-e2e-non-git-workspace")
 
 const mutate = (page: Page, url: string, body: unknown, method: "POST" | "PATCH" | "PUT" | "DELETE" = "POST") =>
@@ -240,7 +241,7 @@ test("rejects files outside the server-owned allowed-root policy", async ({ requ
 
   const pluginMutation = await request.post("/api/packages/plugins/actions", {
     headers: { origin: baseURL },
-    data: { cwd: fixtureWorkspace, action: "install", source: "/etc", scope: "project" },
+    data: { cwd: fixtureWorkspace, action: "install", source: "/path/that/does/not/exist", scope: "project" },
   })
   expect(pluginMutation.status()).toBe(403)
   await expect(pluginMutation.json()).resolves.toMatchObject({ _tag: "Forbidden" })
@@ -502,17 +503,20 @@ test("loads model, auth, plugin, and skill projections without mutating user sta
   expect(skillRoundTrip.disabled).toContain("disable-model-invocation: true")
   expect(skillRoundTrip.enabled).not.toContain("disable-model-invocation")
 
-  const pluginRoundTrip = await page.evaluate(async (cwd) => {
-    const action = async (name: "install" | "remove") => {
-      const response = await fetch("/api/packages/plugins/actions", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cwd, action: name, source: "./e2e-plugin", scope: "project" }),
-      })
-      return { status: response.status, body: await response.json() }
-    }
-    return { installed: await action("install"), removed: await action("remove") }
-  }, fixtureWorkspace)
+  const pluginRoundTrip = await page.evaluate(
+    async ({ cwd, source }) => {
+      const action = async (name: "install" | "remove") => {
+        const response = await fetch("/api/packages/plugins/actions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ cwd, action: name, source, scope: "project" }),
+        })
+        return { status: response.status, body: await response.json() }
+      }
+      return { installed: await action("install"), removed: await action("remove") }
+    },
+    { cwd: fixtureWorkspace, source: fixturePluginDirectory },
+  )
   expect(pluginRoundTrip.installed.status, JSON.stringify(pluginRoundTrip.installed.body)).toBe(200)
   expect(pluginRoundTrip.installed.body).toMatchObject({
     packages: expect.arrayContaining([expect.objectContaining({ packageName: "pi-web-e2e-plugin" })]),

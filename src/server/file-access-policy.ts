@@ -11,6 +11,7 @@ export class FileAccessPolicy extends Context.Service<
   FileAccessPolicy,
   {
     readonly allowRoot: (root: string) => Effect.Effect<void>
+    readonly admitExistingRoot: (root: string) => Effect.Effect<string, FileAccessError>
     readonly assertExisting: (target: string) => Effect.Effect<string, FileAccessError>
     readonly assertProspective: (target: string) => Effect.Effect<string, FileAccessError>
   }
@@ -61,14 +62,22 @@ const layerEffect = Effect.gen(function* () {
     return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))
   }
 
+  const canonicalExisting = (target: string) =>
+    fs
+      .realPath(path.resolve(target))
+      .pipe(Effect.mapError(() => new FileAccessError({ path: target, message: "Path does not exist" })))
+
+  const admitExistingRoot = (root: string) =>
+    Effect.gen(function* () {
+      const resolved = yield* canonicalExisting(root)
+      yield* allowRoot(resolved)
+      return resolved
+    })
+
   const authorize = (target: string, existing: boolean) =>
     Effect.gen(function* () {
       const normalizedTarget = path.resolve(target)
-      const resolvedTarget = existing
-        ? yield* fs
-            .realPath(normalizedTarget)
-            .pipe(Effect.mapError(() => new FileAccessError({ path: target, message: "Path does not exist" })))
-        : normalizedTarget
+      const resolvedTarget = existing ? yield* canonicalExisting(normalizedTarget) : normalizedTarget
       const allowed = yield* roots
       for (const root of allowed) {
         const resolvedRoot = yield* fs.realPath(root).pipe(Effect.catch(() => Effect.succeed(path.resolve(root))))
@@ -79,6 +88,7 @@ const layerEffect = Effect.gen(function* () {
 
   return FileAccessPolicy.of({
     allowRoot,
+    admitExistingRoot,
     assertExisting: (target) => authorize(target, true),
     assertProspective: (target) => authorize(target, false),
   })
