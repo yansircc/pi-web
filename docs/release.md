@@ -1,31 +1,12 @@
-# Release checklist
+# Automated release
 
-Artifacts:
+`main` is the only release source. GitHub Actions maps each eligible source SHA to one version and one immutable npm archive, verifies that archive, commits the version bump, tags the release commit, publishes through npm Trusted Publishing, and confirms public registry integrity.
 
-- npm package: `@yansircc/pi-web`
-- GitHub release: `yansircc/pi-web`
+Do not change `package.json.version` manually, create release tags manually, run `pnpm publish`, or configure an npm token. The trusted publisher coordinates are `yansircc / pi-web / ci.yml` with no GitHub environment.
 
-Run this process from a clean `main` checkout with Node `>=22.19.0`, pnpm `10.11.0`, and Vite Plus `0.2.4`. The repository must contain only `pnpm-lock.yaml`.
+## Local gate
 
-## 1. Preflight
-
-```bash
-corepack enable
-set -a
-. ./.dev.vars
-set +a
-node --version
-pnpm --version
-git status --short --branch
-git log --oneline --decorate -5
-gh auth status
-pnpm whoami
-effect-skill-scan --version
-```
-
-The scanner must be a clean installed build. A changed scanner build id requires a fresh baseline review; do not compare only compliance hashes across scanner builds.
-
-## 2. Reproduce the release gates
+Run from a clean `main` checkout with the versions declared by the repository:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -39,82 +20,41 @@ pnpm test:package
 git diff --check
 ```
 
-Required evidence:
+`test:package` packs once, installs the archive into empty npm and pnpm consumers, starts the packaged CLI, and checks health, page, and SSE behavior. The CI archive matrix runs the same command on Linux, macOS, and Windows against the one uploaded archive.
 
-- Effect scan resolves `v4`, has zero findings, and has no orphaned/ownerless suppression.
-- Playwright uses the isolated fixture under `test-results/`; it must not read or mutate the operator's real Pi state.
-- The package smoke installs the tarball into empty npm and pnpm consumers and validates health, page, and SSE.
-- The CI package matrix is green on macOS, Linux, and Windows.
-- The tarball does not contain `.output/server/node_modules`, `.next`, source, or caches.
+## Select a bump
 
-## 3. Bump and inspect
+An ordinary eligible push uses `patch`. To request a different increment, add exactly one trailer to the source commit:
 
-```bash
-pnpm version patch --no-git-tag-version
-git diff -- package.json pnpm-lock.yaml
-pnpm pack --pack-destination "$(mktemp -d)"
+```text
+Release-Bump: minor
 ```
 
-Confirm the tarball inventory is limited to `bin`, `.output`, `public`, and `package.json`. The Nitro entry must be `.output/server/index.mjs`.
+Accepted values are `major`, `minor`, and `patch`. The release commit records both `Release-Source` and `Release-Bump`.
 
-## 4. Commit, tag, and push the immutable source
+## CI transition
 
-The registry artifact must be derived from a source commit that already exists remotely. Never publish first and attempt to create its tag afterward.
-
-```bash
-git add package.json pnpm-lock.yaml
-git commit -m "chore(release): prepare v<version>"
-git tag -a v<version> -m "v<version>"
-git push origin main --tags
+```text
+source SHA
+→ verify
+→ prepare version and pack once
+→ three-platform archive verification
+→ release commit and tag
+→ OIDC publish of the same archive
+→ registry integrity equality
+→ public archive verification
 ```
 
-All commits use Conventional Commits. Confirm the tag does not already exist before creating it, then wait for the tag/commit CI matrix to pass.
+A failure before `commit_release` makes commit, tag, and publication unreachable. Rerunning the same source workflow reuses the existing release only when the registry archive has the same integrity.
 
-## 5. Publish from the verified tag
-
-Check out the pushed tag in a clean checkout. The package `prepack` hook rebuilds the Nitro artifact. The committed `.npmrc` reads `NPM_TOKEN` from the ignored root `.dev.vars`; never commit the token.
+## Verify a release
 
 ```bash
-git checkout v<version>
-pnpm install --frozen-lockfile
-set -a
-. ./.dev.vars
-set +a
-pnpm publish
+gh run list --repo yansircc/pi-web --branch main --limit 5
+gh run view <run-id> --repo yansircc/pi-web
+git fetch origin main --tags
+git log -1 --format=fuller origin/main
+npm view @yansircc/pi-web@<version> dist.integrity --registry=https://registry.npmjs.org/
 ```
 
-Verify the exact version against the public registry:
-
-```bash
-pnpm view @yansircc/pi-web@<version> version --registry https://registry.npmjs.org/
-```
-
-## 6. Release notes
-
-Derive notes from the actual range, not memory:
-
-```bash
-git log --format='%h%x09%s%n%b' v<previous>..v<version>
-git diff --stat v<previous>..v<version>
-```
-
-Include Chinese and English sections, grouped into Added, Fixed, Improved, and Internal. Mention the published npm version.
-
-```bash
-gh release create v<version> \
-  --repo yansircc/pi-web \
-  --verify-tag \
-  --title "v<version>" \
-  --notes-file release-notes.md
-```
-
-## 7. Final verification
-
-```bash
-gh release view v<version> --repo yansircc/pi-web
-pnpm view @yansircc/pi-web@<version> version --registry https://registry.npmjs.org/
-git status --short --branch
-git log --oneline --decorate -3
-```
-
-The GitHub release must exist, the exact npm version must resolve, and `main`/tag/working tree must be aligned.
+Completion requires the latest `main` run to succeed, the tag to point at the bot release commit, the registry integrity to equal the verified artifact, and the local branch to fast-forward to the clean release commit.

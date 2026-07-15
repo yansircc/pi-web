@@ -11,14 +11,21 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'release-main' || format('{0}-{1}', github.workflow, github.ref) }}
-  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+  group: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.actor != 'github-actions[bot]' && 'release-main' || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main' && github.actor != 'github-actions[bot]') }}
 
 jobs:
   verify:
-    name: Verify
-    if: github.event_name != 'push' || github.ref != 'refs/heads/main'
-    runs-on: ubuntu-latest
+    name: Verify (${{ matrix.os }})
+    if: github.event_name != 'push' || github.actor != 'github-actions[bot]'
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
 
     steps:
@@ -38,15 +45,13 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
 
-      - name: Install browser runtime
-        run: pnpm exec playwright install --with-deps chromium
-
       - name: Verify package
         run: |
           pnpm run verify
 
   release:
     name: Prepare release
+    needs: verify
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -77,6 +82,7 @@ jobs:
         with:
           node-version: 24.11.0
           cache: pnpm
+          registry-url: https://registry.npmjs.org
 
       - name: Synchronize release branch
         run: |
@@ -90,9 +96,6 @@ jobs:
       - name: Install dependencies
         run: |
           pnpm install --frozen-lockfile
-
-      - name: Install browser runtime
-        run: pnpm exec playwright install --with-deps chromium
 
       - name: Verify package
         run: |
@@ -125,7 +128,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  verify-archive:
+  verify_archive:
     name: Verify release archive (${{ matrix.os }})
     needs: release
     strategy:
@@ -155,7 +158,8 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          pnpm install --frozen-lockfile
 
       - name: Download verified archive
         uses: actions/download-artifact@v8
@@ -163,14 +167,14 @@ jobs:
           name: npm-package-${{ github.sha }}
           path: release
 
-      - name: Install and run the verified archive
-        run: pnpm test:package -- release/package.tgz
-
-  commit-release:
+      - name: Verify exact release archive
+        run: pnpm run test:package -- release/package.tgz
+  commit_release:
     name: Commit and tag release
     needs:
       - release
-      - verify-archive
+      - verify_archive
+
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -255,8 +259,9 @@ jobs:
     name: Publish npm package
     needs:
       - release
-      - verify-archive
-      - commit-release
+      - verify_archive
+
+      - commit_release
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -325,34 +330,56 @@ jobs:
       - release
       - publish
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     permissions:
       contents: read
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
           node-version: 24.11.0
+          cache: pnpm
           registry-url: https://registry.npmjs.org
 
-      - name: Verify public installation
+      - name: Install dependencies
+        run: |
+          pnpm install --frozen-lockfile
+
+      - name: Download verified archive
+        uses: actions/download-artifact@v8
+        with:
+          name: npm-package-${{ github.sha }}
+          path: release
+
+      - name: Verify registry integrity and public installation
         shell: bash
         env:
           NPM_CONFIG_USERCONFIG: /dev/null
           PACKAGE_SPEC: ${{ needs.release.outputs.name }}@${{ needs.release.outputs.version }}
         run: |
-          visible=false
+          local_integrity="sha512-$(openssl dgst -sha512 -binary ./release/package.tgz | openssl base64 -A)"
+          remote_integrity=""
           for attempt in {1..60}; do
-            if npm view "${PACKAGE_SPEC}" version --registry=https://registry.npmjs.org/ >/dev/null 2>&1; then
-              visible=true
+            if remote_json="$(npm view "${PACKAGE_SPEC}" dist.integrity --json --registry=https://registry.npmjs.org/ 2>/dev/null)"; then
+              remote_integrity="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]))' "${remote_json}")"
               break
             fi
             sleep 5
           done
-          if [[ "${visible}" != true ]]; then
+          if [[ -z "${remote_integrity}" ]]; then
             echo "${PACKAGE_SPEC} did not become publicly visible." >&2
+            exit 1
+          fi
+          if [[ "${remote_integrity}" != "${local_integrity}" ]]; then
+            echo "Public ${PACKAGE_SPEC} does not match the verified archive." >&2
             exit 1
           fi
           install_root="$(mktemp -d)"
@@ -363,39 +390,19 @@ jobs:
             --no-audit \
             --no-fund
 
-          INSTALL_ROOT="${install_root}" node --input-type=module <<'NODE'
-          import assert from "node:assert/strict";
-          import { spawn } from "node:child_process";
+      - name: Fetch public archive
+        shell: bash
+        env:
+          PACKAGE_SPEC: ${{ needs.release.outputs.name }}@${{ needs.release.outputs.version }}
+        run: |
+          mkdir -p public-release
+          npm pack "${PACKAGE_SPEC}" --pack-destination public-release
+          mapfile -t archives < <(find public-release -maxdepth 1 -type f -name '*.tgz')
+          if [[ "${#archives[@]}" -ne 1 ]]; then
+            echo "Expected one public npm archive, found ${#archives[@]}." >&2
+            exit 1
+          fi
+          mv "${archives[0]}" public-release/package.tgz
 
-          const bin = `${process.env.INSTALL_ROOT}/node_modules/.bin/pi-web`;
-          const child = spawn(bin, ["-p", "30243", "-H", "127.0.0.1"], {
-            env: { ...process.env, PI_WEB_OPEN_BROWSER: "0" },
-            stdio: ["ignore", "pipe", "pipe"],
-          });
-          let stderr = "";
-          child.stderr.on("data", (chunk) => { stderr += chunk; });
-          try {
-            let ready = false;
-            for (let attempt = 0; attempt < 150; attempt += 1) {
-              if (child.exitCode !== null) throw new Error(`pi-web exited ${child.exitCode}: ${stderr}`);
-              try {
-                const health = await fetch("http://127.0.0.1:30243/api/health");
-                if (health.ok) {
-                  ready = true;
-                  break;
-                }
-              } catch {}
-              await new Promise((resolve) => setTimeout(resolve, 100));
-            }
-            assert.ok(ready, `public pi-web did not become ready: ${stderr}`);
-            const page = await fetch("http://127.0.0.1:30243/");
-            assert.ok(page.ok);
-            assert.match(await page.text(), /Pi Agent Web/);
-            const events = await fetch("http://127.0.0.1:30243/api/sessions/running/events");
-            assert.ok(events.ok);
-            assert.match(events.headers.get("content-type") ?? "", /text\/event-stream/);
-            await events.body?.cancel();
-          } finally {
-            child.kill("SIGTERM");
-          }
-          NODE
+      - name: Verify public archive
+        run: pnpm run test:package -- public-release/package.tgz
