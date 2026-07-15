@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react"
+import { useCallback, useLayoutEffect, useRef } from "react"
 import type { Effect } from "effect"
 import { runApi } from "./api-client"
 import { makeEffectScopeLifecycle } from "./effect-scope-lifecycle"
@@ -14,7 +14,9 @@ export const useBrowserEffectScope = (owner: string) => {
   if (lifecycleRef.current === null) lifecycleRef.current = makeEffectScopeLifecycle()
   const lifecycle = lifecycleRef.current
 
-  useEffect(() => {
+  // Owner changes invalidate old completions during commit, before passive effects
+  // can start projecting state for the next session or draft.
+  useLayoutEffect(() => {
     const epoch = lifecycle.mount(owner)
     const ownedRuns = runs.current
     return () => {
