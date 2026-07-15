@@ -39,9 +39,10 @@ const installChromeRuntime = (runtime: ChromeExtensionRuntime) => {
   )
 }
 
-it("detects only a loaded pi-chrome package", () => {
-  expect(hasLoadedPiChrome(plugins([{ packageName: "pi-chrome", status: "loaded" }]))).toBe(true)
-  expect(hasLoadedPiChrome(plugins([{ packageName: "pi-chrome", status: "disabled" }]))).toBe(false)
+it("detects only the loaded canonical pi-chrome package", () => {
+  expect(hasLoadedPiChrome(plugins([{ packageName: "@yansircc/pi-chrome", status: "loaded" }]))).toBe(true)
+  expect(hasLoadedPiChrome(plugins([{ packageName: "@yansircc/pi-chrome", status: "disabled" }]))).toBe(false)
+  expect(hasLoadedPiChrome(plugins([{ packageName: "pi-chrome", status: "loaded" }]))).toBe(false)
   expect(hasLoadedPiChrome(plugins([{ packageName: "another-package", status: "loaded" }]))).toBe(false)
   expect(hasLoadedPackage(plugins([{ packageName: "@agegr/pi-weixin", status: "loaded" }]), "@agegr/pi-weixin")).toBe(
     true,
@@ -53,14 +54,14 @@ it("detects only a loaded pi-chrome package", () => {
     getPiChromeExtensionId(
       plugins([
         {
-          packageName: "pi-chrome",
+          packageName: "@yansircc/pi-chrome",
           status: "loaded",
           chromeExtensionId: "extension-id",
         },
       ]),
     ),
   ).toBe("extension-id")
-  expect(getPiChromeExtensionId(plugins([{ packageName: "pi-chrome", status: "installed" }]))).toBeNull()
+  expect(getPiChromeExtensionId(plugins([{ packageName: "@yansircc/pi-chrome", status: "installed" }]))).toBeNull()
 })
 
 it.effect("prepares, completes, and reads status through the profile extension", () =>

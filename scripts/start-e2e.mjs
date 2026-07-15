@@ -29,6 +29,8 @@ await writeFile(
   "---\nname: e2e-skill\ndescription: isolated fixture\n---\n\n# E2E skill\n",
 )
 const fixturePluginDirectory = join(fixtureRoot, "e2e-plugin")
+const fixtureNpmCommandLog = join(fixtureRoot, "npm-command.log")
+const fixtureNpmCommand = join(fixtureRoot, "npm-command.mjs")
 const fixturePluginSkillDirectory = join(fixturePluginDirectory, "skills", "plugin-skill")
 await mkdir(fixturePluginSkillDirectory, { recursive: true })
 await writeFile(
@@ -46,6 +48,26 @@ await writeFile(
 await writeFile(
   join(fixturePluginSkillDirectory, "SKILL.md"),
   "---\nname: plugin-skill\ndescription: local package fixture\n---\n\n# Plugin skill\n",
+)
+const agentDirectory = join(home, ".pi", "agent")
+await mkdir(join(agentDirectory, "npm"), { recursive: true })
+await writeFile(
+  fixtureNpmCommand,
+  `import { spawn } from "node:child_process"
+import { writeFile } from "node:fs/promises"
+const args = process.argv.slice(2)
+if (args.includes("uninstall")) {
+  await writeFile(${JSON.stringify(fixtureNpmCommandLog)}, args.join(" "))
+  process.exit(1)
+}
+const child = spawn("npm", args, { stdio: "inherit" })
+child.once("error", () => process.exit(1))
+child.once("exit", (code) => process.exit(code ?? 1))
+`,
+)
+await writeFile(
+  join(agentDirectory, "settings.json"),
+  JSON.stringify({ packages: [], npmCommand: [process.execPath, fixtureNpmCommand] }),
 )
 process.env.HOME = home
 process.env.USERPROFILE = home

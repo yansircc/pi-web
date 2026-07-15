@@ -1,5 +1,17 @@
 const RESOURCE_FILTERS = ["extensions", "skills", "prompts", "themes"] as const
 
+export const PI_COMPANION_PACKAGE_NAMES = {
+  chrome: "@yansircc/pi-chrome",
+  loop: "@yansircc/pi-loop",
+  weixin: "@yansircc/pi-weixin",
+} as const
+
+export type PiCompanionPackage = keyof typeof PI_COMPANION_PACKAGE_NAMES
+
+export function isPiCompanionPackage(packageName: string | undefined, companion: PiCompanionPackage): boolean {
+  return packageName === PI_COMPANION_PACKAGE_NAMES[companion]
+}
+
 export type ConfiguredPackageSource =
   | string
   | {
@@ -23,6 +35,14 @@ export function isLocalPackageSource(source: string): boolean {
 export function isDisabledPackage(entry: ConfiguredPackageSource): boolean {
   if (typeof entry === "string") return false
   return RESOURCE_FILTERS.every((key) => Array.isArray(entry[key]) && entry[key].length === 0)
+}
+
+export function removeConfiguredPackage(
+  packages: ReadonlyArray<ConfiguredPackageSource>,
+  source: string,
+): { changed: boolean; packages: ConfiguredPackageSource[] } {
+  const next = packages.filter((entry) => getPackageSource(entry) !== source)
+  return { changed: next.length !== packages.length, packages: next }
 }
 
 function enablePackage(entry: Exclude<ConfiguredPackageSource, string>): ConfiguredPackageSource {

@@ -86,9 +86,11 @@ import {
   mergeBuiltinSelectionWithActiveExtensions,
 } from "@/lib/tool-presets"
 import {
+  PI_COMPANION_PACKAGE_NAMES,
   getPackageSource,
   isDisabledPackage,
   isLocalPackageSource,
+  removeConfiguredPackage,
   setConfiguredPackageDisabled,
 } from "@/lib/plugin-package-settings"
 
@@ -1956,7 +1958,7 @@ const adapterLive = Effect.gen(function* () {
       const packageName = typeof parsed.value.name === "string" ? parsed.value.name : undefined
       const version = typeof parsed.value.version === "string" ? parsed.value.version : undefined
       let chromeExtensionId: string | undefined
-      if (packageName === "pi-chrome") {
+      if (packageName === PI_COMPANION_PACKAGE_NAMES.chrome) {
         const manifest = yield* fs
           .readFileString(path.join(root, "dist", "browser-extension", "manifest.json"))
           .pipe(Effect.option)
@@ -2109,12 +2111,15 @@ const adapterLive = Effect.gen(function* () {
         })
         yield* Effect.tryPromise({ try: () => settings.flush(), catch: adapterError("plugins.flush") })
       } else if (action === "remove") {
-        const removed = yield* Effect.tryPromise({
-          try: () => manager.removeAndPersist(normalized!, { local: scope === "project" }),
-          catch: adapterError("plugins.remove"),
-        })
-        if (!removed)
+        const current =
+          scope === "project"
+            ? (settings.getProjectSettings().packages ?? [])
+            : (settings.getGlobalSettings().packages ?? [])
+        const mutation = removeConfiguredPackage(current, normalized!)
+        if (!mutation.changed)
           return yield* new PiAdapterError({ operation: "plugins.remove", message: "Configured package not found" })
+        if (scope === "project") settings.setProjectPackages(mutation.packages)
+        else settings.setPackages(mutation.packages)
         yield* Effect.tryPromise({ try: () => settings.flush(), catch: adapterError("plugins.flush") })
       } else if (action === "update") {
         if (normalized !== undefined && !isLocalPackageSource(normalized)) {

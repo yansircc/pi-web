@@ -1,6 +1,7 @@
 import { Clock, Data, Duration, Effect, Schema } from "effect"
 import { BrowserPlatform } from "@/browser/browser-platform"
 import type { ChromeStatusProjection } from "@/api/contract"
+import { PI_COMPANION_PACKAGE_NAMES } from "./plugin-package-settings"
 import type { ToolEntry } from "./tool-presets"
 
 interface PluginsProjection {
@@ -16,13 +17,13 @@ export function hasLoadedPackage(plugins: PluginsProjection, packageName: string
 }
 
 export function hasLoadedPiChrome(plugins: PluginsProjection): boolean {
-  return hasLoadedPackage(plugins, "pi-chrome")
+  return hasLoadedPackage(plugins, PI_COMPANION_PACKAGE_NAMES.chrome)
 }
 
 export function getPiChromeExtensionId(plugins: PluginsProjection): string | null {
   return (
-    plugins.packages.find((pkg) => pkg.packageName === "pi-chrome" && pkg.status === "loaded")?.chromeExtensionId ??
-    null
+    plugins.packages.find((pkg) => pkg.packageName === PI_COMPANION_PACKAGE_NAMES.chrome && pkg.status === "loaded")
+      ?.chromeExtensionId ?? null
   )
 }
 

@@ -6,6 +6,8 @@ import pkg from "../../package.json" with { type: "json" }
 
 const fixtureWorkspace = resolve("test-results/e2e-fixture/workspace")
 const fixturePluginDirectory = resolve("test-results/e2e-fixture/e2e-plugin")
+const fixtureNpmCommandLog = resolve("test-results/e2e-fixture/npm-command.log")
+const fixtureSettingsPath = resolve("test-results/e2e-fixture/home/.pi/agent/settings.json")
 const nonGitWorkspace = resolve(tmpdir(), "pi-web-e2e-non-git-workspace")
 
 const mutate = (page: Page, url: string, body: unknown, method: "POST" | "PATCH" | "PUT" | "DELETE" = "POST") =>
@@ -505,15 +507,19 @@ test("loads model, auth, plugin, and skill projections without mutating user sta
 
   const pluginRoundTrip = await page.evaluate(
     async ({ cwd, source }) => {
-      const action = async (name: "install" | "remove") => {
+      const action = async (name: "install" | "remove", actionSource: string) => {
         const response = await fetch("/api/packages/plugins/actions", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ cwd, action: name, source, scope: "project" }),
+          body: JSON.stringify({ cwd, action: name, source: actionSource, scope: "project" }),
         })
         return { status: response.status, body: await response.json() }
       }
-      return { installed: await action("install"), removed: await action("remove") }
+      const installed = await action("install", source)
+      const configured = installed.body.packages.find(
+        (pkg: { packageName?: string; source: string }) => pkg.packageName === "pi-web-e2e-plugin",
+      )
+      return { installed, removed: await action("remove", configured?.source ?? source) }
     },
     { cwd: fixtureWorkspace, source: fixturePluginDirectory },
   )
@@ -525,6 +531,17 @@ test("loads model, auth, plugin, and skill projections without mutating user sta
   expect(pluginRoundTrip.removed.body.packages).not.toEqual(
     expect.arrayContaining([expect.objectContaining({ packageName: "pi-web-e2e-plugin" })]),
   )
+
+  const settings = JSON.parse(await readFile(fixtureSettingsPath, "utf8")) as Record<string, unknown>
+  await writeFile(fixtureSettingsPath, JSON.stringify({ ...settings, packages: ["npm:@fixture/uninstalled"] }))
+  const npmRemoval = await mutate(page, "/api/packages/plugins/actions", {
+    cwd: fixtureWorkspace,
+    action: "remove",
+    source: "npm:@fixture/uninstalled",
+    scope: "global",
+  })
+  expect(npmRemoval.status).toBe(200)
+  await expect(readFile(fixtureNpmCommandLog, "utf8")).rejects.toThrow()
 
   const authRoundTrip = await page.evaluate(async () => {
     const providersResponse = await fetch("/api/auth/api-key/providers")
