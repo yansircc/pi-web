@@ -38,6 +38,9 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
 
+      - name: Install browser runtime
+        run: pnpm exec playwright install --with-deps chromium
+
       - name: Verify package
         run: |
           pnpm run verify
@@ -87,6 +90,9 @@ jobs:
       - name: Install dependencies
         run: |
           pnpm install --frozen-lockfile
+
+      - name: Install browser runtime
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Verify package
         run: |
