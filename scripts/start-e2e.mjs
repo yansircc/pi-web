@@ -8,7 +8,8 @@ const root = fileURLToPath(new URL("..", import.meta.url))
 const fixtureRoot = join(root, "test-results", "e2e-fixture")
 const home = join(fixtureRoot, "home")
 const workspace = join(fixtureRoot, "workspace")
-const executable = process.platform === "win32" ? "pnpm.cmd" : "pnpm"
+const packageManagerEntry = process.env.npm_execpath
+if (!packageManagerEntry) throw new Error("start-e2e must run through the repository package manager")
 const port = process.env.PI_WEB_E2E_PORT ?? "30141"
 const extensionPath = process.env.PI_WEB_E2E_EXTENSION_PATH
 
@@ -109,16 +110,20 @@ await run("git", [
   "test: initialize fixture",
 ])
 
-const server = spawn(executable, ["exec", "vp", "dev", "--host", "127.0.0.1", "--port", port], {
-  cwd: root,
-  env: {
-    ...process.env,
-    HOME: home,
-    USERPROFILE: home,
-    PI_WEB_OPEN_BROWSER: "0",
+const server = spawn(
+  process.execPath,
+  [packageManagerEntry, "exec", "vp", "dev", "--host", "127.0.0.1", "--port", port],
+  {
+    cwd: root,
+    env: {
+      ...process.env,
+      HOME: home,
+      USERPROFILE: home,
+      PI_WEB_OPEN_BROWSER: "0",
+    },
+    stdio: "inherit",
   },
-  stdio: "inherit",
-})
+)
 
 const stop = (signal) => {
   if (server.exitCode === null) server.kill(signal)
