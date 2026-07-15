@@ -1,0 +1,183 @@
+import { Option } from "effect"
+import { expect, test } from "@effect/vitest"
+import { ChromeStatusProjection } from "@/api/contract"
+import {
+  decodeChromeStatusProjection,
+  extensionStructuredStatusOrUndefined,
+  getWeixinStatusProjection,
+  isChromeAuthorized,
+  projectChromeWebStatus,
+  sameWeixinStatusProjection,
+} from "./extension-status"
+
+test("decodes the pi-chrome readiness projection without interpreting display text", () => {
+  const status = ChromeStatusProjection.make({
+    kind: "pi-chrome/status",
+    version: 1,
+    readiness: "ready",
+    authorization: { expiresAt: 123_000 },
+    connection: "connected",
+    bridge: "running",
+    connectorLabel: "Personal",
+  })
+  expect(Option.getOrNull(decodeChromeStatusProjection(status))).toEqual(status)
+})
+
+test("rejects incomplete or unknown status projections", () => {
+  expect(Option.isNone(decodeChromeStatusProjection({ kind: "pi-chrome/status", version: 1 }))).toBe(true)
+  expect(
+    Option.isNone(
+      decodeChromeStatusProjection({
+        kind: "pi-chrome/status",
+        version: 1,
+        readiness: "ready",
+        authorization: "indefinite",
+        connection: "connected",
+        bridge: "mystery",
+      }),
+    ),
+  ).toBe(true)
+})
+
+test("preserves extension-owned JSON status projections without treating them as Chrome", () => {
+  const weixin = {
+    kind: "pi-weixin/status",
+    version: 2,
+    bindings: [
+      { sessionId: "session-a", accountId: "wx-a", connected: true },
+      { sessionId: "session-b", accountId: "wx-b", connected: false },
+    ],
+  }
+  expect(extensionStructuredStatusOrUndefined(weixin)).toEqual(weixin)
+  expect(isChromeAuthorized([{ key: "weixin", status: weixin }])).toBe(false)
+  expect(getWeixinStatusProjection([{ key: "weixin", status: weixin }])).toEqual(weixin)
+  expect(getWeixinStatusProjection([])).toBeUndefined()
+})
+
+test("rejects ambiguous Weixin binding cardinality", () => {
+  const status = (bindings: ReadonlyArray<{ sessionId: string; accountId: string; connected: boolean }>) => ({
+    kind: "pi-weixin/status",
+    version: 2,
+    bindings,
+  })
+  expect(
+    getWeixinStatusProjection([
+      {
+        key: "weixin",
+        status: status([
+          { sessionId: "session-a", accountId: "wx-a", connected: true },
+          { sessionId: "session-a", accountId: "wx-b", connected: true },
+        ]),
+      },
+    ]),
+  ).toBeUndefined()
+  expect(
+    getWeixinStatusProjection([
+      {
+        key: "weixin",
+        status: status([
+          { sessionId: "session-a", accountId: "wx-a", connected: true },
+          { sessionId: "session-b", accountId: "wx-a", connected: true },
+        ]),
+      },
+    ]),
+  ).toBeUndefined()
+})
+
+test("compares Weixin bindings by identity rather than projection order", () => {
+  const left = {
+    kind: "pi-weixin/status" as const,
+    version: 2 as const,
+    bindings: [
+      { sessionId: "session-a", accountId: "wx-a", connected: true },
+      { sessionId: "session-b", accountId: "wx-b", connected: false },
+    ],
+  }
+  expect(sameWeixinStatusProjection(left, { ...left, bindings: [...left.bindings].reverse() })).toBe(true)
+})
+
+test("derives authorization only from the structured Chrome projection", () => {
+  expect(isChromeAuthorized([{ key: "chrome", text: "● Chrome (indefinite)" }])).toBe(false)
+  expect(
+    isChromeAuthorized([
+      {
+        key: "chrome",
+        status: ChromeStatusProjection.make({
+          kind: "pi-chrome/status",
+          version: 1,
+          readiness: "offline",
+          authorization: "indefinite",
+          connection: "offline",
+          bridge: "running",
+        }),
+      },
+    ]),
+  ).toBe(true)
+  expect(
+    isChromeAuthorized([
+      {
+        key: "chrome",
+        status: ChromeStatusProjection.make({
+          kind: "pi-chrome/status",
+          version: 1,
+          readiness: "locked",
+          authorization: "locked",
+          connection: "connected",
+          bridge: "running",
+        }),
+      },
+    ]),
+  ).toBe(false)
+})
+
+test("web readiness uses the current page profile instead of the terminal binding", () => {
+  const server = ChromeStatusProjection.make({
+    kind: "pi-chrome/status",
+    version: 1,
+    readiness: "offline",
+    authorization: "indefinite",
+    connection: "offline",
+    bridge: "running",
+    connectorId: "terminal-connector",
+    connectorLabel: "Terminal profile",
+  })
+  expect(
+    projectChromeWebStatus(server, {
+      connected: true,
+      connectorId: "web-connector",
+      connectorLabel: "Current web profile",
+    }),
+  ).toEqual({
+    ...server,
+    readiness: "ready",
+    connection: "connected",
+    connectorId: "web-connector",
+    connectorLabel: "Current web profile",
+  })
+  expect(
+    projectChromeWebStatus(ChromeStatusProjection.make({ ...server, readiness: "ready" }), {
+      connected: false,
+    }),
+  ).toEqual({
+    kind: "pi-chrome/status",
+    version: 1,
+    authorization: "indefinite",
+    bridge: "running",
+    readiness: "offline",
+    connection: "offline",
+  })
+  expect(
+    projectChromeWebStatus(
+      ChromeStatusProjection.make({
+        ...server,
+        readiness: "locked",
+        authorization: "locked",
+      }),
+      {
+        connected: true,
+        connectorId: "web-connector",
+        connectorLabel: "Current web profile",
+      },
+    ).readiness,
+  ).toBe("locked")
+})

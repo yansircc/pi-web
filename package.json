@@ -1,0 +1,86 @@
+{
+  "name": "@yansircc/pi-web",
+  "version": "0.1.0",
+  "description": "Web UI for the pi coding agent",
+  "type": "module",
+  "homepage": "https://github.com/yansircc/pi-web#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yansircc/pi-web.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yansircc/pi-web/issues"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "packageManager": "pnpm@10.11.0",
+  "bin": {
+    "pi-web": "bin/pi-web.js"
+  },
+  "files": [
+    "bin",
+    ".output",
+    "!.output/server/node_modules",
+    "public",
+    "package.json"
+  ],
+  "scripts": {
+    "prepare": "effect-tsgo patch --typescript-package typescript",
+    "dev": "vp dev --port 30141",
+    "build": "vp build",
+    "start": "node .output/server/index.mjs",
+    "typecheck": "vp run ci:typecheck",
+    "lint": "vp lint",
+    "format": "vp fmt",
+    "test": "vp test",
+    "test:e2e": "playwright test",
+    "test:package": "node scripts/test-package.mjs",
+    "effect:scan": "vp run ci:effect",
+    "check": "vp run ci:verify",
+    "prepack": "vp build"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.80.6",
+    "@earendil-works/pi-coding-agent": "0.80.6"
+  },
+  "devDependencies": {
+    "@effect/platform-browser": "4.0.0-beta.98",
+    "@effect/platform-node": "4.0.0-beta.98",
+    "@tanstack/react-router": "1.170.18",
+    "@tanstack/react-start": "1.168.28",
+    "effect": "4.0.0-beta.98",
+    "katex": "0.16.47",
+    "mammoth": "1.12.0",
+    "mermaid": "11.14.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-markdown": "10.1.0",
+    "react-syntax-highlighter": "16.1.1",
+    "rehype-katex": "7.0.1",
+    "rehype-raw": "7.0.0",
+    "rehype-sanitize": "6.0.0",
+    "remark-gfm": "4.0.1",
+    "remark-math": "6.0.0",
+    "@effect/tsgo": "0.21.0",
+    "@effect/vitest": "4.0.0-beta.98",
+    "@playwright/test": "1.61.1",
+    "@tailwindcss/vite": "4.3.2",
+    "@types/node": "25.0.0",
+    "@types/react": "19.2.4",
+    "@types/react-dom": "19.2.3",
+    "@types/react-syntax-highlighter": "15.5.13",
+    "@vitejs/plugin-react": "6.0.3",
+    "nitro": "3.0.260610-beta",
+    "tailwindcss": "4.3.2",
+    "typescript": "7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.4",
+    "vite-plus": "0.2.4",
+    "vitest": "4.1.10"
+  }
+}
