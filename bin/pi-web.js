@@ -4,7 +4,7 @@ import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { parseArgs } from "node:util"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
 const packageDir = join(dirname(fileURLToPath(import.meta.url)), "..")
 const serverEntry = join(packageDir, ".output", "server", "index.mjs")
@@ -49,7 +49,7 @@ process.env.NITRO_PORT = port
 process.env.NITRO_HOST = hostname
 process.env.PI_WEB_PLATFORM ??= process.platform
 
-await import(serverEntry)
+await import(pathToFileURL(serverEntry).href)
 
 const browserHost = hostname === "0.0.0.0" || hostname === "::" ? "127.0.0.1" : hostname
 const url = `http://${browserHost.includes(":") ? `[${browserHost}]` : browserHost}:${port}`
