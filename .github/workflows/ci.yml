@@ -74,7 +74,6 @@ jobs:
         with:
           node-version: 24.11.0
           cache: pnpm
-          registry-url: https://registry.npmjs.org
 
       - name: Synchronize release branch
         run: |
