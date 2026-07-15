@@ -10,10 +10,37 @@ const commandExecutable = (name) =>
   process.platform === "win32" && ["npm", "npx", "pnpm"].includes(name) ? `${name}.cmd` : name
 const packageBin = (name) => (process.platform === "win32" ? `${name}.cmd` : name)
 const installTimeoutMs = 5 * 60_000
+const stopTimeoutMs = 10_000
+
+const spawnCommand = (command, args, options = {}) =>
+  spawn(commandExecutable(command), args, {
+    ...options,
+    shell: process.platform === "win32",
+  })
+
+const hasExited = (child) => child.exitCode !== null || child.signalCode !== null
+
+const waitForExit = (child, timeoutMs) => {
+  if (hasExited(child)) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    let settled = false
+    const settle = (exited) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      child.off("exit", onExit)
+      resolve(exited)
+    }
+    const onExit = () => settle(true)
+    const timer = setTimeout(() => settle(false), timeoutMs)
+    child.once("exit", onExit)
+    if (hasExited(child)) settle(true)
+  })
+}
 
 const run = (command, args, options = {}) =>
   new Promise((resolve, reject) => {
-    const child = spawn(commandExecutable(command), args, {
+    const child = spawnCommand(command, args, {
       cwd: options.cwd,
       detached: process.platform !== "win32",
       env: { ...process.env, ...options.env },
@@ -28,7 +55,9 @@ const run = (command, args, options = {}) =>
         : setTimeout(() => {
             timedOut = true
             if (process.platform === "win32") {
-              const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" })
+              const killer = spawnCommand("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+                stdio: "ignore",
+              })
               killer.unref()
             } else if (child.pid !== undefined) {
               process.kill(-child.pid, "SIGKILL")
@@ -70,29 +99,26 @@ const waitFor = async (url, child) => {
 }
 
 const stop = async (child) => {
-  if (child.exitCode !== null) return
+  if (hasExited(child)) return
+  const gracefulExit = waitForExit(child, stopTimeoutMs)
   if (process.platform === "win32") {
     await run("taskkill", ["/pid", String(child.pid), "/t", "/f"]).catch(() => undefined)
   } else {
     child.kill("SIGTERM")
   }
-  if (child.exitCode !== null) return
-  const exited = await new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), 5_000)
-    child.once("exit", () => {
-      clearTimeout(timer)
-      resolve(true)
-    })
-  })
-  if (!exited) {
+  if (await gracefulExit) return
+  const forcedExit = waitForExit(child, stopTimeoutMs)
+  if (process.platform === "win32") {
+    await run("taskkill", ["/pid", String(child.pid), "/t", "/f"]).catch(() => undefined)
+  } else {
     child.kill("SIGKILL")
-    throw new Error(`pi-web process ${child.pid} did not exit within 5 seconds`)
   }
+  if (!(await forcedExit)) throw new Error(`pi-web process ${child.pid} did not exit after forced termination`)
 }
 
 const expectCliFailure = async (directory, args) => {
   const bin = join(directory, "node_modules", ".bin", packageBin("pi-web"))
-  const child = spawn(bin, args, {
+  const child = spawnCommand(bin, args, {
     cwd: directory,
     env: { ...process.env, PI_WEB_OPEN_BROWSER: "0" },
     stdio: "pipe",
@@ -127,7 +153,7 @@ const smoke = async ({ directory, port, flags, environment = {} }) => {
   if (!("HOST" in environment)) delete env.HOST
   delete env.NITRO_PORT
   delete env.NITRO_HOST
-  const child = spawn(bin, flags, {
+  const child = spawnCommand(bin, flags, {
     cwd: directory,
     env,
     stdio: "pipe",
