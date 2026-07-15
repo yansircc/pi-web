@@ -42,6 +42,7 @@
     "test:e2e": "playwright test",
     "test:package": "node scripts/test-package.mjs",
     "effect:scan": "vp run ci:effect",
+    "verify": "pnpm run check",
     "check": "vp run ci:verify",
     "prepack": "vp build"
   },
@@ -78,6 +79,7 @@
     "@vitejs/plugin-react": "6.0.3",
     "nitro": "3.0.260610-beta",
     "tailwindcss": "4.3.2",
+    "tar": "7.5.20",
     "typescript": "7.0.2",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.2.4",
     "vite-plus": "0.2.4",

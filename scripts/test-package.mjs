@@ -1,11 +1,17 @@
 import { spawn } from "node:child_process"
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { basename, join } from "node:path"
+import { basename, join, resolve } from "node:path"
 import process from "node:process"
+import { fileURLToPath } from "node:url"
+import { t as listArchive } from "tar"
 
 const projectRoot = new URL("..", import.meta.url)
+const projectDirectory = fileURLToPath(projectRoot)
 const temporaryRoot = await mkdtemp(join(tmpdir(), "pi-web-package-"))
+const archiveArguments = process.argv.slice(2)
+if (archiveArguments[0] === "--") archiveArguments.shift()
+if (archiveArguments.length > 1) throw new Error("usage: test-package.mjs [archive]")
 const commandExecutable = (name) =>
   process.platform === "win32" && ["npm", "npx", "pnpm"].includes(name) ? `${name}.cmd` : name
 const packageBin = (name) => (process.platform === "win32" ? `${name}.cmd` : name)
@@ -181,13 +187,20 @@ const smoke = async ({ directory, port, flags, environment = {} }) => {
 }
 
 try {
-  const packed = await run("pnpm", ["pack", "--pack-destination", temporaryRoot], {
-    cwd: projectRoot,
-  })
-  const tarballLine = packed.stdout.trim().split(/\r?\n/).at(-1)
-  if (tarballLine === undefined) throw new Error("pnpm pack did not report a tarball")
-  const tarball = join(temporaryRoot, basename(tarballLine))
-  const listing = (await run("tar", ["-tf", tarball])).stdout.split(/\r?\n/)
+  const archiveInput = archiveArguments[0]
+  let tarball
+  if (archiveInput === undefined) {
+    const packed = await run("pnpm", ["pack", "--pack-destination", temporaryRoot], {
+      cwd: projectRoot,
+    })
+    const tarballLine = packed.stdout.trim().split(/\r?\n/).at(-1)
+    if (tarballLine === undefined) throw new Error("pnpm pack did not report a tarball")
+    tarball = join(temporaryRoot, basename(tarballLine))
+  } else {
+    tarball = resolve(projectDirectory, archiveInput)
+  }
+  const listing = []
+  await listArchive({ file: tarball, onReadEntry: (entry) => listing.push(entry.path) })
   const forbidden = listing.filter(
     (entry) =>
       entry.includes(".output/server/node_modules/") ||
