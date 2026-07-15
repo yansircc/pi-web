@@ -318,6 +318,62 @@ it.effect("expires idle runtime scopes with TestClock", () =>
   }),
 )
 
+it.effect("keeps a runtime alive while an extension owns a runtime lease", () =>
+  Effect.gen(function* () {
+    const disposeCount = yield* Ref.make(0)
+    const base = yield* makeRuntime("session-leased", disposeCount)
+    const leased: PiRuntime = {
+      ...base,
+      snapshot: Effect.succeed({
+        ...runtimeSnapshot(base.sessionId, base.sessionFile),
+        extensionStatuses: [
+          {
+            key: "pi-loop/runtime-lease",
+            status: {
+              kind: "pi/runtime-lease",
+              version: 1,
+              owner: "pi-loop",
+              reason: "automation-present",
+            },
+          },
+        ],
+      }),
+    }
+    const adapter: SessionRuntimeAdapter = {
+      createRuntime: () => Effect.succeed(leased),
+      createFork: () => Effect.succeed({ cancelled: true }),
+    }
+    const registry = yield* makeSessionRuntimeRegistry(adapter, runIds)
+    yield* registry.start(leased.sessionId, { sessionFile: leased.sessionFile, cwd: leased.cwd })
+    yield* Effect.yieldNow
+    yield* TestClock.adjust("20 minutes")
+    expect(yield* registry.activeOption(leased.sessionId)).not.toBeNull()
+    expect(yield* Ref.get(disposeCount)).toBe(0)
+    yield* registry.close(leased.sessionId)
+  }),
+)
+
+it.effect("closes an idle runtime when lease inspection fails", () =>
+  Effect.gen(function* () {
+    const disposeCount = yield* Ref.make(0)
+    const base = yield* makeRuntime("session-lease-failure", disposeCount)
+    const runtime: PiRuntime = {
+      ...base,
+      snapshot: Effect.fail(new PiAdapterError({ operation: "runtime.snapshot", message: "unavailable" })),
+    }
+    const adapter: SessionRuntimeAdapter = {
+      createRuntime: () => Effect.succeed(runtime),
+      createFork: () => Effect.succeed({ cancelled: true }),
+    }
+    const registry = yield* makeSessionRuntimeRegistry(adapter, runIds)
+    yield* registry.start(runtime.sessionId, { sessionFile: runtime.sessionFile, cwd: runtime.cwd })
+    yield* Effect.yieldNow
+    yield* TestClock.adjust("10 minutes")
+    expect(yield* registry.activeOption(runtime.sessionId)).toBeNull()
+    expect(yield* Ref.get(disposeCount)).toBe(1)
+  }),
+)
+
 it.effect("returns bash run identity before completion and redacts background failures", () =>
   Effect.gen(function* () {
     const disposeCount = yield* Ref.make(0)

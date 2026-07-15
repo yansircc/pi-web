@@ -13,12 +13,19 @@
 - 在服务端 allowed-root 策略内浏览和预览文件。
 - 创建和删除 Git worktree，脏 worktree 使用结构化 conflict 流程。
 - 使用 session-owned 的 pi-chrome attach/assert/detach 事务。
+- 管理 `@yansircc/pi-loop` 的多个会话自动化任务，包括倒计时、暂停、立即执行和 interval 编辑。
 - 默认中文，并提供可见的语言、主题、声音、草稿和未读状态偏好。
 
 ## 环境要求
 
 - Node.js `>=22.19.0`
 - 已安装并正常配置 Pi，状态位于标准 `~/.pi/agent` 目录
+
+安装配套扩展后会显示自动化面板：
+
+```bash
+pi install npm:@yansircc/pi-loop
+```
 
 ## 安装与启动
 

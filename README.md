@@ -13,12 +13,19 @@ Browser UI for the [Pi coding agent](https://github.com/badlogic/pi-mono). It re
 - Browse and preview files behind a server-enforced allowed-root policy.
 - Create and remove Git worktrees, including a structured dirty-worktree conflict flow.
 - Session-owned pi-chrome attach/assert/detach flow.
+- Manage multiple session automations from `@yansircc/pi-loop`, including countdown, pause, run-now, and interval editing.
 - Chinese-first UI with visible locale, theme, sound, draft, and unread preferences.
 
 ## Requirements
 
 - Node.js `>=22.19.0`
 - A working Pi installation and its normal `~/.pi/agent` configuration
+
+The automation panel appears when the companion extension is installed:
+
+```bash
+pi install npm:@yansircc/pi-loop
+```
 
 ## Install and run
 

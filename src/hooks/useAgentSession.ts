@@ -4,6 +4,7 @@ import type { Cancel } from "@/browser/api-client"
 import { after } from "@/browser/timing"
 import { useBrowserEffectScope } from "@/browser/use-browser-effect-scope"
 import { loadSessionSnapshot, observeSession, sessionController } from "@/features/session/session-controller"
+import { controlRequest, type LoopControlAction } from "@/features/session/session-automation"
 import {
   initialSessionUiState,
   projectSessionEntryIds,
@@ -205,6 +206,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [chromeToolsActive, setChromeToolsActive] = useState<boolean | null>(null)
   const [chromeControlPending, setChromeControlPending] = useState(false)
   const [chromeProfileConnection, setChromeProfileConnection] = useState<SameProfileChromeConnection | null>(null)
+  const [loopControlPending, setLoopControlPending] = useState(false)
   const [noticeState, dispatchNotice] = useReducer(noticeReducer, { visible: [], pending: [] } satisfies NoticeState)
   const runScoped = useBrowserEffectScope()
 
@@ -926,6 +928,25 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     [addNotice, chromeControlPending, chromeExtensionId, ensureSession, loadSnapshot, runScoped],
   )
 
+  const handleLoopControl = useCallback(
+    (action: LoopControlAction) => {
+      const sessionId = sessionIdRef.current
+      if (sessionId === null || loopControlPending) return
+      setLoopControlPending(true)
+      runScoped(sessionController.extensionCommand(sessionId, "loop-control", JSON.stringify(controlRequest(action))), {
+        onSuccess: (result) => {
+          dispatch({ _tag: "ExtensionStatusesChanged", statuses: result.extensionStatuses })
+          setLoopControlPending(false)
+        },
+        onFailure: (error) => {
+          setLoopControlPending(false)
+          addNotice({ type: "error", message: messageFor(error) })
+        },
+      })
+    },
+    [addNotice, loopControlPending, runScoped],
+  )
+
   const respondToExtensionUi = useCallback(
     (request: ExtensionDialog, response: { value: string } | { confirmed: boolean } | { cancelled: true }) => {
       const sessionId = sessionIdRef.current
@@ -1110,6 +1131,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleBuiltinSlashCommand,
     handleToolPresetChange,
     handleChromeControlChange,
+    handleLoopControl,
+    loopControlPending,
     handleThinkingLevelChange,
     loadTools,
     loadSlashCommands,

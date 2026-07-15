@@ -29,6 +29,7 @@ import {
   PiPromptIdempotencyError,
 } from "./pi-agent-adapter"
 import type { PromptInput } from "./prompt-request"
+import { hasRuntimeLease } from "@/lib/runtime-lease"
 
 export class RuntimeRegistryError extends Data.TaggedError("RuntimeRegistryError")<{
   readonly operation: string
@@ -194,8 +195,17 @@ export const makeSessionRuntimeRegistry = (adapter: SessionRuntimeAdapter, idGen
           Queue.take(handle.activity).pipe(Effect.as(false)),
           Effect.sleep("10 minutes").pipe(Effect.as(true)),
         ).pipe(
-          Effect.flatMap((expired) => (expired ? closeHandle(handle) : idleLoop(handle))),
-          Effect.catch(() => Effect.void),
+          Effect.flatMap((expired) =>
+            expired
+              ? handle.runtime.snapshot.pipe(
+                  Effect.matchEffect({
+                    onFailure: () => closeHandle(handle),
+                    onSuccess: (snapshot) =>
+                      hasRuntimeLease(snapshot.extensionStatuses) ? idleLoop(handle) : closeHandle(handle),
+                  }),
+                )
+              : idleLoop(handle),
+          ),
         ),
       )
 

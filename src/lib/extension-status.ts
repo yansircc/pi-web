@@ -1,9 +1,11 @@
 import { Option, Schema } from "effect"
 import { ChromeStatusProjection, JsonValue, WeixinStatusProjection, type ExtensionStatusItem } from "@/api/contract"
+import { LoopStatusProjection } from "@/features/session/session-automation"
 import type { SameProfileChromeConnection } from "./chrome-control"
 
 export const decodeChromeStatusProjection = Schema.decodeUnknownOption(ChromeStatusProjection)
 export const decodeWeixinStatusProjection = Schema.decodeUnknownOption(WeixinStatusProjection)
+export const decodeLoopStatusProjection = Schema.decodeUnknownOption(LoopStatusProjection)
 export const decodeExtensionStructuredStatus = Schema.decodeUnknownOption(JsonValue)
 
 export const extensionStructuredStatusOrUndefined = (value: unknown): JsonValue | undefined =>
@@ -25,6 +27,14 @@ export function getChromeStatusProjection(statuses: ExtensionStatusItem[]): Chro
 export function getWeixinStatusProjection(statuses: ExtensionStatusItem[]): WeixinStatusProjection | undefined {
   for (const item of statuses) {
     const status = Option.getOrUndefined(decodeWeixinStatusProjection(item.status))
+    if (status !== undefined) return status
+  }
+  return undefined
+}
+
+export function getLoopStatusProjection(statuses: ExtensionStatusItem[]): LoopStatusProjection | undefined {
+  for (const item of statuses) {
+    const status = Option.getOrUndefined(decodeLoopStatusProjection(item.status))
     if (status !== undefined) return status
   }
   return undefined

@@ -10,6 +10,7 @@ const home = join(fixtureRoot, "home")
 const workspace = join(fixtureRoot, "workspace")
 const executable = process.platform === "win32" ? "pnpm.cmd" : "pnpm"
 const port = process.env.PI_WEB_E2E_PORT ?? "30141"
+const extensionPath = process.env.PI_WEB_E2E_EXTENSION_PATH
 
 const run = (command, args) =>
   new Promise((resolve, reject) => {
@@ -67,7 +68,10 @@ child.once("exit", (code) => process.exit(code ?? 1))
 )
 await writeFile(
   join(agentDirectory, "settings.json"),
-  JSON.stringify({ packages: [], npmCommand: [process.execPath, fixtureNpmCommand] }),
+  JSON.stringify({
+    packages: extensionPath === undefined ? [] : [extensionPath],
+    npmCommand: [process.execPath, fixtureNpmCommand],
+  }),
 )
 process.env.HOME = home
 process.env.USERPROFILE = home

@@ -4,6 +4,7 @@ import { ChromeStatusProjection } from "@/api/contract"
 import {
   decodeChromeStatusProjection,
   extensionStructuredStatusOrUndefined,
+  getLoopStatusProjection,
   getWeixinStatusProjection,
   isChromeAuthorized,
   projectChromeWebStatus,
@@ -52,6 +53,32 @@ test("preserves extension-owned JSON status projections without treating them as
   expect(isChromeAuthorized([{ key: "weixin", status: weixin }])).toBe(false)
   expect(getWeixinStatusProjection([{ key: "weixin", status: weixin }])).toEqual(weixin)
   expect(getWeixinStatusProjection([])).toBeUndefined()
+})
+
+test("decodes the session automation projection from structured extension status", () => {
+  const projection = {
+    kind: "pi-loop/status" as const,
+    version: 1 as const,
+    sessionId: "session-a",
+    observedAt: 1_000,
+    loops: [
+      {
+        id: "loop-a",
+        prompt: "inspect the project",
+        createdAt: 500,
+        enabled: true,
+        retention: "session" as const,
+        schedule: { _tag: "Interval" as const, periodMs: 60_000 },
+        phase: { _tag: "Scheduled" as const, dueAt: 61_000 },
+      },
+    ],
+  }
+  expect(getLoopStatusProjection([{ key: "pi-loop", status: projection }])).toEqual(projection)
+  expect(
+    getLoopStatusProjection([
+      { key: "pi-loop", status: { ...projection, loops: [{ ...projection.loops[0], phase: { _tag: "unknown" } }] } },
+    ]),
+  ).toBeUndefined()
 })
 
 test("rejects ambiguous Weixin binding cardinality", () => {

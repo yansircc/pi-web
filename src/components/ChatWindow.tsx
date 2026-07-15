@@ -33,12 +33,14 @@ import { useIsMobile } from "@/hooks/useIsMobile"
 import { useI18n } from "@/lib/i18n"
 import {
   getChromeStatusProjection,
+  getLoopStatusProjection,
   getWeixinStatusProjection,
   sameWeixinStatusProjection,
 } from "@/lib/extension-status"
 import { NOTICE_AUTO_DISMISS_MS, type NoticeItem, type NoticeType } from "@/lib/notices"
 import { copyText } from "@/lib/clipboard"
 import { runBrowser } from "@/browser/api-client"
+import { SessionAutomationBar } from "./SessionAutomationBar"
 
 interface Props {
   session: SessionInfo | null
@@ -291,6 +293,8 @@ export function ChatWindow({
     handleBuiltinSlashCommand,
     handleToolPresetChange,
     handleChromeControlChange,
+    handleLoopControl,
+    loopControlPending,
     handleThinkingLevelChange,
     loadSlashCommands,
   } = useAgentSession({
@@ -407,6 +411,8 @@ export function ChatWindow({
     : null
 
   const chromeControlStatus = getChromeStatusProjection(extensionStatuses)
+  const loopStatus = getLoopStatusProjection(extensionStatuses)
+  const currentLoopStatus = loopStatus?.sessionId === session?.id ? loopStatus : undefined
 
   const chatInputElement = (
     <ChatInput
@@ -639,6 +645,14 @@ export function ChatWindow({
             <div ref={scrollContainerRef} className="flex-1 overflow-y-auto pt-4 [scrollbar-width:none]">
               <div style={{ padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
                 <div style={{ maxWidth: 820, margin: "0 auto" }}>
+                  {currentLoopStatus !== undefined && (
+                    <SessionAutomationBar
+                      status={currentLoopStatus}
+                      pending={loopControlPending}
+                      sessionBusy={sessionBusy}
+                      onControl={handleLoopControl}
+                    />
+                  )}
                   <ExtensionStatusBar statuses={extensionStatuses} />
                   <ExtensionWidgets widgets={aboveEditorWidgets} />
 
