@@ -45,6 +45,7 @@ const layerEffect = Effect.gen(function* () {
   const path = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const config = yield* AppConfig
+  const canonicalPath = (value: string) => path.resolve(value)
 
   const fileOp = <A>(operation: string, effect: Effect.Effect<A, unknown>) =>
     effect.pipe(Effect.mapError((cause) => new WorkspaceError({ operation, message: String(cause) })))
@@ -125,12 +126,16 @@ const layerEffect = Effect.gen(function* () {
         "--abbrev-ref",
         "HEAD",
       ]).pipe(Effect.catch(() => Effect.succeed("")))
-      const [commonDir, gitDir, topLevel, ref] = output.split("\n").map((line) => line.trim())
-      if (!commonDir || !gitDir || !topLevel) {
+      const [rawCommonDir, rawGitDir, rawTopLevel, ref] = output.split("\n").map((line) => line.trim())
+      if (!rawCommonDir || !rawGitDir || !rawTopLevel) {
         return { projectRoot: cwd, branch: null, isWorktree: false, isTopLevel: false }
       }
+      const commonDir = canonicalPath(rawCommonDir)
+      const gitDir = canonicalPath(rawGitDir)
+      const topLevel = canonicalPath(rawTopLevel)
       const realCwd = yield* fileOp("project.realPath", fs.realPath(cwd)).pipe(
-        Effect.catch(() => Effect.succeed(path.resolve(cwd))),
+        Effect.map(canonicalPath),
+        Effect.catch(() => Effect.succeed(canonicalPath(cwd))),
       )
       const isTopLevel = topLevel === realCwd
       const isWorktree = gitDir !== commonDir && isTopLevel
@@ -148,12 +153,16 @@ const layerEffect = Effect.gen(function* () {
       const records: Array<WorktreeRecord> = []
       let current: { path?: string; branch?: string; prunable?: boolean } | null = null
       const flush = Effect.gen(function* () {
-        if (current?.path && !current.prunable && (yield* fileOp("worktree.exists", fs.exists(current.path)))) {
-          records.push({
-            path: current.path,
-            branch: current.branch ?? null,
-            isMain: records.length === 0,
-          })
+        const candidate = current
+        if (candidate?.path !== undefined) {
+          const candidatePath = canonicalPath(candidate.path)
+          if (!candidate.prunable && (yield* fileOp("worktree.exists", fs.exists(candidatePath)))) {
+            records.push({
+              path: candidatePath,
+              branch: candidate.branch ?? null,
+              isMain: records.length === 0,
+            })
+          }
         }
         current = null
       })
@@ -177,7 +186,9 @@ const layerEffect = Effect.gen(function* () {
     })
 
   const repoRoot = (cwd: string) =>
-    Effect.map(git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]), path.dirname)
+    Effect.map(git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]), (commonDir) =>
+      path.dirname(canonicalPath(commonDir)),
+    )
 
   const sanitizeBranch = (branch: string) => branch.replace(/[/\\:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "")
 
@@ -215,21 +226,25 @@ const layerEffect = Effect.gen(function* () {
 
   const removeWorktree = (cwd: string, target: string, force: boolean) =>
     Effect.gen(function* () {
+      const canonicalTarget = canonicalPath(target)
       const worktrees = yield* listWorktrees(cwd)
-      const record = worktrees.find((worktree) => worktree.path === target)
+      const record = worktrees.find((worktree) => worktree.path === canonicalTarget)
       if (record === undefined) {
-        return yield* new WorkspaceError({ operation: "worktree.remove", message: `Not a worktree: ${target}` })
+        return yield* new WorkspaceError({
+          operation: "worktree.remove",
+          message: `Not a worktree: ${canonicalTarget}`,
+        })
       }
       if (record.isMain) {
         return yield* new WorkspaceError({ operation: "worktree.remove", message: "Cannot remove the main worktree" })
       }
-      const result = yield* run(cwd, ["worktree", "remove", ...(force ? ["--force"] : []), target])
+      const result = yield* run(cwd, ["worktree", "remove", ...(force ? ["--force"] : []), canonicalTarget])
       if (result.code === 0) return
       const dirty = /modified or untracked files|contains modified|is dirty/i.test(result.output)
       return yield* new WorkspaceError({
         operation: "worktree.remove",
         message: result.output || `git exited with ${result.code}`,
-        ...(dirty ? { dirtyPath: target } : {}),
+        ...(dirty ? { dirtyPath: canonicalTarget } : {}),
       })
     })
 

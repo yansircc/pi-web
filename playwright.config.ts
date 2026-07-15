@@ -7,7 +7,7 @@ export default defineConfig({
   use: { baseURL: `http://127.0.0.1:${e2ePort}` },
   webServer: {
     command: "node scripts/start-e2e.mjs",
-    port: e2ePort,
+    url: `http://127.0.0.1:${e2ePort}/api/health`,
     reuseExistingServer: false,
   },
 })

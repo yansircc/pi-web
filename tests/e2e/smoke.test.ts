@@ -305,7 +305,7 @@ test("validates cwd, reads files, and reports dirty worktrees structurally", asy
     },
     "DELETE",
   )
-  expect(conflict.status).toBe(409)
+  expect(conflict.status, JSON.stringify(conflict.body)).toBe(409)
   expect(conflict.body).toMatchObject({
     _tag: "Conflict",
     detail: { _tag: "DirtyWorktree", path: worktreePath },
