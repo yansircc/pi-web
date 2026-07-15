@@ -33,6 +33,12 @@ export class BrowserPlatform extends Context.Service<
   BrowserPlatform,
   {
     readonly readFile: (file: File) => Effect.Effect<BrowserFile, BrowserPlatformError>
+    readonly readTextFile: (file: File) => Effect.Effect<string, BrowserPlatformError>
+    readonly downloadTextFile: (
+      name: string,
+      content: string,
+      mimeType: string,
+    ) => Effect.Effect<void, BrowserPlatformError>
     readonly createObjectUrl: (file: Blob) => Effect.Effect<string, BrowserPlatformError>
     readonly revokeObjectUrl: (url: string) => Effect.Effect<void>
     readonly openExternal: (url: string) => Effect.Effect<void>
@@ -108,6 +114,29 @@ export const BrowserPlatformLive = Layer.succeed(BrowserPlatform, {
         size: file.size,
         bytes: new Uint8Array(buffer),
       })),
+    ),
+  readTextFile: (file) =>
+    Effect.tryPromise({
+      try: () => file.text(),
+      catch: failure("file.read-text"),
+    }),
+  downloadTextFile: (name, content, mimeType) =>
+    Effect.acquireUseRelease(
+      Effect.try({
+        try: () => URL.createObjectURL(new Blob([content], { type: mimeType })),
+        catch: failure("file.download-text.create"),
+      }),
+      (url) =>
+        Effect.try({
+          try: () => {
+            const link = document.createElement("a")
+            link.href = url
+            link.download = name
+            link.click()
+          },
+          catch: failure("file.download-text.click"),
+        }),
+      (url) => Effect.sync(() => URL.revokeObjectURL(url)),
     ),
   createObjectUrl: (file) =>
     Effect.try({

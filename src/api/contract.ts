@@ -646,37 +646,71 @@ export const ModelCatalog = Schema.Struct({
   thinkingLevels: Schema.Record(Schema.String, Schema.Array(Schema.String)),
   thinkingLevelMaps: Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
 })
+const ModelCostTier = Schema.Struct({
+  inputTokensAbove: Schema.Finite,
+  input: Schema.Finite,
+  output: Schema.Finite,
+  cacheRead: Schema.Finite,
+  cacheWrite: Schema.Finite,
+})
+const ModelCost = Schema.Struct({
+  input: Schema.Finite,
+  output: Schema.Finite,
+  cacheRead: Schema.Finite,
+  cacheWrite: Schema.Finite,
+  tiers: Schema.optionalKey(Schema.Array(ModelCostTier)),
+})
+const ModelCostOverride = Schema.Struct({
+  input: Schema.optionalKey(Schema.Finite),
+  output: Schema.optionalKey(Schema.Finite),
+  cacheRead: Schema.optionalKey(Schema.Finite),
+  cacheWrite: Schema.optionalKey(Schema.Finite),
+  tiers: Schema.optionalKey(Schema.Array(ModelCostTier)),
+})
+const ModelInput = Schema.Union([Schema.Literal("text"), Schema.Literal("image")])
+const ModelOverride = Schema.Struct({
+  name: Schema.optionalKey(Schema.String),
+  reasoning: Schema.optionalKey(Schema.Boolean),
+  thinkingLevelMap: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
+  input: Schema.optionalKey(Schema.Array(ModelInput)),
+  cost: Schema.optionalKey(ModelCostOverride),
+  contextWindow: Schema.optionalKey(Schema.Finite),
+  maxTokens: Schema.optionalKey(Schema.Finite),
+  headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  compat: Schema.optionalKey(Schema.Record(Schema.String, JsonValue)),
+})
 export const ModelConfigEntry = Schema.Struct({
   id: Schema.String,
   name: Schema.optionalKey(Schema.String),
   api: Schema.optionalKey(Schema.String),
+  baseUrl: Schema.optionalKey(Schema.String),
   reasoning: Schema.optionalKey(Schema.Boolean),
   thinkingLevelMap: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
-  input: Schema.optionalKey(Schema.Array(Schema.String)),
-  contextWindow: Schema.optionalKey(Schema.Number),
-  maxTokens: Schema.optionalKey(Schema.Number),
-  cost: Schema.optionalKey(
-    Schema.Struct({
-      input: Schema.optionalKey(Schema.Number),
-      output: Schema.optionalKey(Schema.Number),
-      cacheRead: Schema.optionalKey(Schema.Number),
-      cacheWrite: Schema.optionalKey(Schema.Number),
-    }),
-  ),
+  input: Schema.optionalKey(Schema.Array(ModelInput)),
+  contextWindow: Schema.optionalKey(Schema.Finite),
+  maxTokens: Schema.optionalKey(Schema.Finite),
+  cost: Schema.optionalKey(ModelCost),
+  headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   compat: Schema.optionalKey(Schema.Record(Schema.String, JsonValue)),
 })
 export const ProviderConfigEntry = Schema.Struct({
+  name: Schema.optionalKey(Schema.String),
   baseUrl: Schema.optionalKey(Schema.String),
   api: Schema.optionalKey(Schema.String),
   apiKey: Schema.optionalKey(Schema.String),
   headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   compat: Schema.optionalKey(Schema.Record(Schema.String, JsonValue)),
+  authHeader: Schema.optionalKey(Schema.Boolean),
   models: Schema.optionalKey(Schema.Array(ModelConfigEntry)),
-  modelOverrides: Schema.optionalKey(Schema.Record(Schema.String, JsonValue)),
+  modelOverrides: Schema.optionalKey(Schema.Record(Schema.String, ModelOverride)),
 })
 export const ModelsConfig = Schema.Struct({
-  providers: Schema.optionalKey(Schema.Record(Schema.String, ProviderConfigEntry)),
+  providers: Schema.Record(Schema.String, ProviderConfigEntry),
 })
+export const ModelConfigValidation = Schema.Union([
+  Schema.Struct({ valid: Schema.Literal(true) }),
+  Schema.Struct({ valid: Schema.Literal(false), error: Schema.String }),
+])
 export const ModelTestResult = Schema.Struct({
   ok: Schema.Boolean,
   error: Schema.optionalKey(Schema.String),
@@ -1164,6 +1198,11 @@ const ModelsApi = HttpApiGroup.make("models").add(
     error: CommonErrors,
   }),
   HttpApiEndpoint.get("config", "/api/models/config", { success: ModelsConfig, error: CommonErrors }),
+  HttpApiEndpoint.post("validateConfig", "/api/models/config/validate", {
+    payload: ModelsConfig,
+    success: ModelConfigValidation,
+    error: CommonErrors,
+  }),
   HttpApiEndpoint.put("saveConfig", "/api/models/config", {
     payload: ModelsConfig,
     success: Ok,

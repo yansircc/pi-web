@@ -5,6 +5,12 @@ import { useI18n } from "@/lib/i18n"
 import { withApi, runApi, runApiStream, runBrowser, type Cancel } from "@/browser/api-client"
 import { BrowserPlatform } from "@/browser/browser-platform"
 import {
+  ModelsConfigJsonError,
+  decodeModelsConfig,
+  formatModelsConfigJson,
+  parseModelsConfigJson,
+} from "@/lib/models-config-json"
+import {
   ApiKeyProvider as ApiKeyProviderSchema,
   ModelConfigEntry,
   ModelsConfig as ModelsConfigSchema,
@@ -80,6 +86,7 @@ type OAuthLoginState =
 type ModelEntry = typeof ModelConfigEntry.Type
 type ProviderEntry = typeof ProviderConfigEntry.Type
 type ModelsJson = typeof ModelsConfigSchema.Type
+type RawValidationState = "idle" | "validating" | "valid"
 
 type ModelTestState =
   | { phase: "idle" }
@@ -100,6 +107,21 @@ function errorMessage(error: unknown): string {
     ? error.message
     : String(error)
 }
+
+const requirePiValidModelsConfig = (config: ModelsJson) =>
+  withApi((api) => api.models.validateConfig({ payload: config })).pipe(
+    Effect.flatMap((result) =>
+      result.valid
+        ? Effect.succeed(config)
+        : Effect.fail(new ModelsConfigJsonError({ operation: "decode", message: result.error })),
+    ),
+  )
+
+const requireValidModelsConfig = (value: unknown) =>
+  decodeModelsConfig(value).pipe(Effect.flatMap(requirePiValidModelsConfig))
+
+const parseAndValidateModelsConfig = (source: string) =>
+  parseModelsConfigJson(source).pipe(Effect.flatMap(requirePiValidModelsConfig))
 
 // ── Form field helpers ────────────────────────────────────────────────────────
 
@@ -123,6 +145,17 @@ const inputStyle = {
   outline: "none",
   width: "100%",
   boxSizing: "border-box" as const,
+}
+
+const toolbarButtonStyle = {
+  padding: "5px 9px",
+  background: "var(--bg-panel)",
+  border: "1px solid var(--border)",
+  borderRadius: 5,
+  color: "var(--text-muted)",
+  cursor: "pointer",
+  fontSize: 11,
+  whiteSpace: "nowrap" as const,
 }
 
 function TextInput({
@@ -647,11 +680,21 @@ function ModelDetail({
   const { t } = useI18n()
   const [testState, setTestState] = useState<ModelTestState>({ phase: "idle" })
   const set = <K extends keyof ModelEntry>(k: K, v: ModelEntry[K]) => onChange({ ...model, [k]: v })
-  const costVal = (k: keyof NonNullable<ModelEntry["cost"]>) =>
-    model.cost?.[k] !== undefined ? String(model.cost[k]) : ""
-  const setCost = (k: keyof NonNullable<ModelEntry["cost"]>, v: string) => {
+  type CostRate = "input" | "output" | "cacheRead" | "cacheWrite"
+  const costVal = (k: CostRate) => (model.cost?.[k] !== undefined ? String(model.cost[k]) : "")
+  const setCost = (k: CostRate, v: string) => {
     const n = parseFloat(v)
-    onChange({ ...model, cost: { ...(model.cost ?? {}), [k]: isNaN(n) ? undefined : n } })
+    onChange({
+      ...model,
+      cost: {
+        input: model.cost?.input ?? 0,
+        output: model.cost?.output ?? 0,
+        cacheRead: model.cost?.cacheRead ?? 0,
+        cacheWrite: model.cost?.cacheWrite ?? 0,
+        ...(model.cost?.tiers === undefined ? {} : { tiers: model.cost.tiers }),
+        [k]: isNaN(n) ? 0 : n,
+      },
+    })
   }
   const testSummary = (() => {
     if (testState.phase === "idle") return null
@@ -1820,10 +1863,15 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [savedOk, setSavedOk] = useState(false)
   const dismissSavedRef = useRef<Cancel | null>(null)
+  const importInputRef = useRef<HTMLInputElement | null>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [oauthProviders, setOauthProviders] = useState<ReadonlyArray<OAuthProvider>>([])
   const [apiKeyProviders, setApiKeyProviders] = useState<ReadonlyArray<ApiKeyProvider>>([])
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [rawMode, setRawMode] = useState(false)
+  const [rawSource, setRawSource] = useState("")
+  const [rawValidation, setRawValidation] = useState<RawValidationState>("idle")
+  const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => () => dismissSavedRef.current?.(), [])
 
@@ -1845,15 +1893,18 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
     )
   }, [])
 
+  const replaceConfig = useCallback((value: ModelsJson) => {
+    setConfig(value)
+    const firstProvider = Object.keys(value.providers)[0]
+    setSelection(firstProvider === undefined ? null : { type: "provider", name: firstProvider })
+  }, [])
+
   useEffect(() => {
     const cancel = runApi(
       withApi((api) => api.models.config({})),
       {
         onSuccess: (value) => {
-          const normalized = value.providers ? value : { ...value, providers: {} }
-          setConfig(normalized)
-          const keys = Object.keys(normalized.providers ?? {})
-          if (keys.length > 0) setSelection({ type: "provider", name: keys[0] })
+          replaceConfig(value)
           setLoading(false)
         },
         onFailure: () => {
@@ -1865,26 +1916,98 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
     loadOAuthProviders()
     loadApiKeyProviders()
     return cancel
-  }, [loadOAuthProviders, loadApiKeyProviders])
+  }, [loadOAuthProviders, loadApiKeyProviders, replaceConfig])
+
+  const openRawEditor = useCallback(() => {
+    setSaveError(null)
+    setNotice(null)
+    runApi(formatModelsConfigJson(config), {
+      onSuccess: (source) => {
+        setRawSource(source)
+        setRawValidation("idle")
+        setRawMode(true)
+      },
+      onFailure: (cause) => setSaveError(errorMessage(cause)),
+    })
+  }, [config])
+
+  const validateRawEditor = useCallback(() => {
+    setRawValidation("validating")
+    setSaveError(null)
+    setNotice(null)
+    runApi(parseAndValidateModelsConfig(rawSource), {
+      onSuccess: (value) => {
+        replaceConfig(value)
+        setRawValidation("valid")
+        setNotice(t("Valid configuration"))
+      },
+      onFailure: (cause) => {
+        setRawValidation("idle")
+        setSaveError(errorMessage(cause))
+      },
+    })
+  }, [rawSource, replaceConfig, t])
+
+  const importModelsConfig = useCallback(
+    (file: File) => {
+      setSaveError(null)
+      setNotice(null)
+      runBrowser(
+        BrowserPlatform.pipe(
+          Effect.flatMap((browser) => browser.readTextFile(file)),
+          Effect.flatMap(parseAndValidateModelsConfig),
+        ),
+        {
+          onSuccess: (value) => {
+            replaceConfig(value)
+            setRawMode(false)
+            setRawValidation("idle")
+            setNotice(t("Imported and validated. Save to apply."))
+          },
+          onFailure: (cause) => setSaveError(errorMessage(cause)),
+        },
+      )
+    },
+    [replaceConfig, t],
+  )
+
+  const exportModelsConfig = useCallback(() => {
+    setSaveError(null)
+    setNotice(null)
+    runBrowser(
+      requireValidModelsConfig(config).pipe(
+        Effect.flatMap(formatModelsConfigJson),
+        Effect.flatMap((source) =>
+          BrowserPlatform.pipe(
+            Effect.flatMap((browser) => browser.downloadTextFile("models.json", source, "application/json")),
+          ),
+        ),
+      ),
+      {
+        onSuccess: () => setNotice(t("Exported validated configuration")),
+        onFailure: (cause) => setSaveError(errorMessage(cause)),
+      },
+    )
+  }, [config, t])
 
   const addCustomProvider = useCallback(() => {
     let finalName = "new-provider"
     let n = 1
-    while (config.providers?.[finalName]) finalName = `new-provider-${n++}`
+    while (config.providers[finalName]) finalName = `new-provider-${n++}`
     setConfig((prev) => ({
       ...prev,
-      providers: { ...(prev.providers ?? {}), [finalName]: { api: "openai-completions" } },
+      providers: { ...prev.providers, [finalName]: { api: "openai-completions" } },
     }))
     setSelection({ type: "provider", name: finalName })
   }, [config.providers])
 
   const updateProvider = useCallback((name: string, p: ProviderEntry) => {
-    setConfig((prev) => ({ ...prev, providers: { ...(prev.providers ?? {}), [name]: p } }))
+    setConfig((prev) => ({ ...prev, providers: { ...prev.providers, [name]: p } }))
   }, [])
 
   const renameProvider = useCallback((oldName: string, newName: string) => {
     setConfig((prev) => {
-      const entries = Object.entries(prev.providers ?? {})
+      const entries = Object.entries(prev.providers)
       const idx = entries.findIndex(([k]) => k === oldName)
       if (idx === -1) return prev
       entries[idx] = [newName, entries[idx][1]]
@@ -1900,12 +2023,12 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
 
   const deleteProvider = useCallback((name: string) => {
     setConfig((prev) => {
-      const providers = { ...(prev.providers ?? {}) }
+      const providers = { ...prev.providers }
       delete providers[name]
       return { ...prev, providers }
     })
     setConfig((prev) => {
-      const remaining = Object.keys(prev.providers ?? {})
+      const remaining = Object.keys(prev.providers)
       setSelection(remaining.length > 0 ? { type: "provider", name: remaining[0] } : null)
       return prev
     })
@@ -1913,12 +2036,12 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
 
   const addModel = useCallback((providerName: string) => {
     setConfig((prev) => {
-      const provider = prev.providers?.[providerName] ?? {}
+      const provider = prev.providers[providerName] ?? {}
       const models = [...(provider.models ?? []), { id: "" }]
-      return { ...prev, providers: { ...(prev.providers ?? {}), [providerName]: { ...provider, models } } }
+      return { ...prev, providers: { ...prev.providers, [providerName]: { ...provider, models } } }
     })
     setConfig((prev) => {
-      const idx = (prev.providers?.[providerName]?.models?.length ?? 1) - 1
+      const idx = (prev.providers[providerName]?.models?.length ?? 1) - 1
       setSelection({ type: "model", providerName, index: idx })
       return prev
     })
@@ -1926,22 +2049,22 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
 
   const updateModel = useCallback((providerName: string, index: number, m: ModelEntry) => {
     setConfig((prev) => {
-      const provider = prev.providers?.[providerName] ?? {}
+      const provider = prev.providers[providerName] ?? {}
       const models = [...(provider.models ?? [])]
       models[index] = m
-      return { ...prev, providers: { ...(prev.providers ?? {}), [providerName]: { ...provider, models } } }
+      return { ...prev, providers: { ...prev.providers, [providerName]: { ...provider, models } } }
     })
   }, [])
 
   const removeModel = useCallback((providerName: string, index: number) => {
     setConfig((prev) => {
-      const provider = prev.providers?.[providerName] ?? {}
+      const provider = prev.providers[providerName] ?? {}
       const models = [...(provider.models ?? [])]
       models.splice(index, 1)
       return {
         ...prev,
         providers: {
-          ...(prev.providers ?? {}),
+          ...prev.providers,
           [providerName]: { ...provider, models: models.length ? models : undefined },
         },
       }
@@ -1952,9 +2075,12 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
   const handleSave = useCallback(() => {
     setSaving(true)
     setSaveError(null)
+    setNotice(null)
     setSavedOk(false)
     runApi(
-      withApi((api) => api.models.saveConfig({ payload: config })),
+      requireValidModelsConfig(config).pipe(
+        Effect.flatMap((validated) => withApi((api) => api.models.saveConfig({ payload: validated }))),
+      ),
       {
         onSuccess: () => {
           setSaving(false)
@@ -1972,9 +2098,11 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
     )
   }, [config])
 
-  const providers = Object.entries(config.providers ?? {})
+  const providers = Object.entries(config.providers)
   const activeOAuth = oauthProviders.filter((p) => p.loggedIn)
   const activeApiKey = apiKeyProviders.filter((p) => p.configured)
+  const rawDraftPending = rawMode && rawValidation !== "valid"
+  const saveDisabled = saving || savedOk || rawDraftPending
 
   // Resolve current detail
   const detailContent = (() => {
@@ -1990,7 +2118,7 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
       return <ApiKeyDetail key={p.id} provider={p} onRefresh={loadApiKeyProviders} />
     }
     if (selection.type === "provider") {
-      const provider = config.providers?.[selection.name]
+      const provider = config.providers[selection.name]
       if (!provider) return null
       return (
         <ProviderDetail
@@ -2003,7 +2131,7 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
         />
       )
     }
-    const provider = config.providers?.[selection.providerName]
+    const provider = config.providers[selection.providerName]
     const model = provider?.models?.[selection.index]
     if (!model) return null
     return (
@@ -2054,17 +2182,64 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
             style={{
               display: "flex",
               alignItems: "center",
-              justifyContent: "space-between",
+              gap: 12,
               padding: "12px 18px",
               borderBottom: "1px solid var(--border)",
               flexShrink: 0,
             }}
           >
-            <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
               <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{t("Models")}</span>
-              <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+              <code
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-muted)",
+                  fontFamily: "var(--font-mono)",
+                  display: isMobile ? "none" : undefined,
+                }}
+              >
                 ~/.pi/agent/models.json
               </code>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, flex: 1 }}>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json,.json"
+                style={{ display: "none" }}
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0]
+                  event.currentTarget.value = ""
+                  if (file !== undefined) importModelsConfig(file)
+                }}
+              />
+              <button onClick={() => importInputRef.current?.click()} style={toolbarButtonStyle}>
+                {t("Import")}
+              </button>
+              <button
+                onClick={exportModelsConfig}
+                disabled={rawDraftPending}
+                style={{
+                  ...toolbarButtonStyle,
+                  cursor: rawDraftPending ? "default" : toolbarButtonStyle.cursor,
+                  opacity: rawDraftPending ? 0.5 : 1,
+                }}
+              >
+                {t("Export")}
+              </button>
+              <button
+                onClick={() => {
+                  if (rawMode) setRawMode(false)
+                  else openRawEditor()
+                }}
+                style={{
+                  ...toolbarButtonStyle,
+                  color: rawMode ? "var(--accent)" : toolbarButtonStyle.color,
+                  borderColor: rawMode ? "var(--accent)" : "var(--border)",
+                }}
+              >
+                {t(rawMode ? "Back to form" : "Raw JSON")}
+              </button>
             </div>
             <button
               onClick={onClose}
@@ -2370,22 +2545,68 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
 
             {/* Right: detail */}
             <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
-              {loading
-                ? null
-                : (detailContent ?? (
-                    <div
-                      style={{
-                        height: "100%",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "var(--text-dim)",
-                        fontSize: 13,
-                      }}
+              {loading ? null : rawMode ? (
+                <div style={{ height: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{t("Raw models JSON")}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                    {t("Validate the JSON before saving. Invalid content never replaces models.json.")}
+                  </div>
+                  <textarea
+                    aria-label={t("Raw models JSON")}
+                    value={rawSource}
+                    spellCheck={false}
+                    onChange={(event) => {
+                      setRawSource(event.target.value)
+                      setRawValidation("idle")
+                      setSaveError(null)
+                      setNotice(null)
+                    }}
+                    style={{
+                      flex: 1,
+                      minHeight: 280,
+                      resize: "none",
+                      padding: 12,
+                      border: `1px solid ${rawValidation === "valid" ? "#16a34a" : "var(--border)"}`,
+                      borderRadius: 6,
+                      background: "var(--bg-panel)",
+                      color: "var(--text)",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 12,
+                      lineHeight: 1.5,
+                      outline: "none",
+                    }}
+                  />
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+                    {rawValidation === "valid" && (
+                      <span style={{ color: "#16a34a", fontSize: 11, marginRight: "auto" }}>
+                        {t("Valid configuration")}
+                      </span>
+                    )}
+                    <button
+                      onClick={validateRawEditor}
+                      disabled={rawValidation === "validating"}
+                      style={toolbarButtonStyle}
                     >
-                      {t("Select a provider or model")}
-                    </div>
-                  ))}
+                      {t(rawValidation === "validating" ? "Validating…" : "Validate")}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                (detailContent ?? (
+                  <div
+                    style={{
+                      height: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "var(--text-dim)",
+                      fontSize: 13,
+                    }}
+                  >
+                    {t("Select a provider or model")}
+                  </div>
+                ))
+              )}
             </div>
           </div>
 
@@ -2401,7 +2622,10 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
               flexShrink: 0,
             }}
           >
-            {saveError && <span style={{ fontSize: 12, color: "#f87171", flex: 1 }}>{saveError}</span>}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {saveError && <div style={{ fontSize: 12, color: "#f87171" }}>{saveError}</div>}
+              {!saveError && notice && <div style={{ fontSize: 12, color: "#16a34a" }}>{notice}</div>}
+            </div>
             <button
               onClick={onClose}
               style={{
@@ -2418,16 +2642,16 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
             </button>
             <button
               onClick={handleSave}
-              disabled={saving || savedOk}
+              disabled={saveDisabled}
               style={{
                 position: "relative",
                 padding: "6px 16px",
                 minWidth: 92,
-                background: savedOk ? "#16a34a" : saving ? "var(--bg-panel)" : "var(--accent)",
+                background: savedOk ? "#16a34a" : saveDisabled ? "var(--bg-panel)" : "var(--accent)",
                 border: "none",
                 borderRadius: 6,
-                color: savedOk ? "#fff" : saving ? "var(--text-muted)" : "#fff",
-                cursor: saving || savedOk ? "default" : "pointer",
+                color: savedOk ? "#fff" : saveDisabled ? "var(--text-muted)" : "#fff",
+                cursor: saveDisabled ? "default" : "pointer",
                 fontSize: 13,
                 fontWeight: 600,
                 display: "inline-flex",

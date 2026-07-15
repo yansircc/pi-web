@@ -52,6 +52,7 @@ import {
   ExtensionWidgetItem,
   JsonValue,
   ModelCatalog,
+  ModelConfigValidation,
   ModelsConfig,
   ModelTestResult,
   OAuthEvent,
@@ -256,6 +257,9 @@ export class PiAgentAdapter extends Context.Service<
     readonly exportHtml: (filePath: string) => Effect.Effect<string, PiAdapterError>
     readonly modelCatalog: (cwd: string) => Effect.Effect<typeof ModelCatalog.Type, PiAdapterError>
     readonly readModelsConfig: Effect.Effect<typeof ModelsConfig.Type, PiAdapterError>
+    readonly validateModelsConfig: (
+      value: typeof ModelsConfig.Type,
+    ) => Effect.Effect<typeof ModelConfigValidation.Type, PiAdapterError>
     readonly saveModelsConfig: (value: typeof ModelsConfig.Type) => Effect.Effect<void, PiAdapterError>
     readonly testModelConfig: (
       providerName: string,
@@ -1542,6 +1546,29 @@ const adapterLive = Effect.gen(function* () {
   const modelsPath = path.join(getAgentDir(), "models.json")
   const defaultModelsConfig = ModelsConfig.make({ providers: {} })
 
+  const encodeModelsConfig = (value: typeof ModelsConfig.Type) =>
+    Schema.encodeUnknownEffect(ModelsConfig)(value).pipe(Effect.mapError(adapterError("models.config.encode")))
+
+  const validateEncodedModelsConfig = (encoded: unknown) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const directory = yield* fs
+          .makeTempDirectoryScoped({ prefix: "pi-web-models-validate-" })
+          .pipe(Effect.mapError(adapterError("models.config.validate.temp")))
+        const filePath = path.join(directory, "models.json")
+        yield* fs
+          .writeFileString(filePath, JSON.stringify(encoded, null, 2))
+          .pipe(Effect.mapError(adapterError("models.config.validate.write")))
+        const loadError = ModelRegistry.create(AuthStorage.create(), filePath).getError()
+        return loadError === undefined
+          ? ModelConfigValidation.make({ valid: true })
+          : ModelConfigValidation.make({ valid: false, error: loadError.split("\n\nFile:")[0] ?? loadError })
+      }),
+    )
+
+  const validateModelsConfig = (value: typeof ModelsConfig.Type) =>
+    encodeModelsConfig(value).pipe(Effect.flatMap(validateEncodedModelsConfig))
+
   const readModelsConfig = Effect.gen(function* () {
     const source = yield* fs.readFileString(modelsPath).pipe(
       Effect.map((value) => value as string | null),
@@ -1561,9 +1588,11 @@ const adapterLive = Effect.gen(function* () {
 
   const saveModelsConfig = (value: typeof ModelsConfig.Type) =>
     Effect.gen(function* () {
-      const encoded = yield* Schema.encodeUnknownEffect(ModelsConfig)(value).pipe(
-        Effect.mapError(adapterError("models.config.encode")),
-      )
+      const encoded = yield* encodeModelsConfig(value)
+      const validation = yield* validateEncodedModelsConfig(encoded)
+      if (!validation.valid) {
+        return yield* new PiAdapterError({ operation: "models.config.validate", message: validation.error })
+      }
       yield* fs
         .makeDirectory(path.dirname(modelsPath), { recursive: true })
         .pipe(Effect.mapError(adapterError("models.config.mkdir")))
@@ -2263,6 +2292,7 @@ const adapterLive = Effect.gen(function* () {
       ),
     modelCatalog,
     readModelsConfig,
+    validateModelsConfig,
     saveModelsConfig,
     testModelConfig,
     oauthProviders,

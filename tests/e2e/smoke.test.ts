@@ -444,6 +444,81 @@ test("decodes invalid payloads before domain execution", async ({ page }) => {
   expect(query.body).toMatchObject({ _tag: "InvalidInput", field: "query" })
 })
 
+test("imports, exports, and validates raw model JSON", async ({ page }) => {
+  const modelsPath = resolve("test-results/e2e-fixture/home/.pi/agent/models.json")
+  await rm(modelsPath, { force: true })
+  await page.goto("/")
+  await page.getByRole("button", { name: "模型", exact: true }).click()
+  await page.getByRole("button", { name: "Raw JSON", exact: true }).click()
+
+  const editor = page.getByRole("textbox", { name: "模型 Raw JSON" })
+  await expect(page.getByRole("button", { name: "保存", exact: true })).toBeDisabled()
+  await expect(page.getByRole("button", { name: "导出", exact: true })).toBeDisabled()
+  await editor.fill("{}")
+  await page.getByRole("button", { name: "校验", exact: true }).click()
+  await expect(page.getByText(/providers/).last()).toBeVisible()
+  await expect(page.getByRole("button", { name: "保存", exact: true })).toBeDisabled()
+
+  const source = '{"providers":{}}'
+  await editor.fill(source)
+  await page.getByRole("button", { name: "校验", exact: true }).click()
+  await expect(page.getByText("配置有效", { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole("button", { name: "保存", exact: true })).toBeEnabled()
+  await expect(page.getByRole("button", { name: "导出", exact: true })).toBeEnabled()
+
+  await page.locator('input[type="file"][accept*="json"]').setInputFiles({
+    name: "models.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(source),
+  })
+  await expect(page.getByText("已导入并通过校验，保存后生效。", { exact: true })).toBeVisible()
+
+  const downloadPromise = page.waitForEvent("download")
+  await page.getByRole("button", { name: "导出", exact: true }).click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe("models.json")
+})
+
+test("rejects Pi-invalid model configs without replacing the file", async ({ page }) => {
+  const modelsPath = resolve("test-results/e2e-fixture/home/.pi/agent/models.json")
+  await mkdir(dirname(modelsPath), { recursive: true })
+  const baseline = '{"providers":{}}'
+  await writeFile(modelsPath, baseline)
+  await page.goto("/")
+
+  const invalid = {
+    providers: {
+      custom: {
+        api: "openai-completions",
+        models: [{ id: "model-1" }],
+      },
+    },
+  }
+  const validation = await mutate(page, "/api/models/config/validate", invalid)
+  expect(validation.status).toBe(200)
+  expect(validation.body).toMatchObject({ valid: false, error: expect.stringContaining("baseUrl") })
+
+  const save = await mutate(page, "/api/models/config", invalid, "PUT")
+  expect(save.status).toBe(500)
+  expect(await readFile(modelsPath, "utf8")).toBe(baseline)
+
+  const valid = {
+    providers: {
+      custom: {
+        baseUrl: "https://example.test/v1",
+        api: "openai-completions",
+        models: [{ id: "model-1" }],
+      },
+    },
+  }
+  const validResult = await mutate(page, "/api/models/config/validate", valid)
+  expect(validResult).toEqual({ status: 200, body: { valid: true } })
+  const saved = await mutate(page, "/api/models/config", valid, "PUT")
+  expect(saved).toEqual({ status: 200, body: { ok: true } })
+  expect(JSON.parse(await readFile(modelsPath, "utf8"))).toEqual(valid)
+  await rm(modelsPath)
+})
+
 test("fails closed on a corrupt models config without overwriting it", async ({ request }) => {
   const modelsPath = resolve("test-results/e2e-fixture/home/.pi/agent/models.json")
   await mkdir(dirname(modelsPath), { recursive: true })

@@ -599,6 +599,7 @@ const ModelsLive = HttpApiBuilder.group(PiWebApi, "models", (handlers) =>
         ),
       )
       .handle("config", () => expose(adapter.readModelsConfig))
+      .handle("validateConfig", ({ payload }) => expose(adapter.validateModelsConfig(payload)))
       .handle("saveConfig", ({ payload }) => expose(adapter.saveModelsConfig(payload)).pipe(Effect.as(ok)))
       .handle("testConfig", ({ payload }) =>
         expose(adapter.testModelConfig(payload.providerName, payload.provider, payload.model)),
