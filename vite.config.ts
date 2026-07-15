@@ -41,7 +41,7 @@ export default defineConfig(({ mode }) => ({
         cache: false,
       },
       "ci:effect": {
-        command: "effect-skill-scan . --strict --output gate-json --evidence .effect-scan --fail-on-suppression-drift",
+        command: "effect-scan . --strict --output gate-json --evidence .effect-scan --fail-on-suppression-drift",
         cache: false,
       },
       "ci:verify": {
