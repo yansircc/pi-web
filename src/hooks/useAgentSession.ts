@@ -208,7 +208,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [chromeProfileConnection, setChromeProfileConnection] = useState<SameProfileChromeConnection | null>(null)
   const [loopControlPending, setLoopControlPending] = useState(false)
   const [noticeState, dispatchNotice] = useReducer(noticeReducer, { visible: [], pending: [] } satisfies NoticeState)
-  const runScoped = useBrowserEffectScope()
+  const effectScopeOwner = session === null ? `draft:${draftEpoch}` : `session:${session.id}`
+  const runScoped = useBrowserEffectScope(effectScopeOwner)
 
   const sessionIdRef = useRef<string | null>(session?.id ?? null)
   const observerRef = useRef<Cancel | null>(null)

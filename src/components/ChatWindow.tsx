@@ -346,12 +346,6 @@ export function ChatWindow({
   useEffect(() => {
     onSessionStatsChange?.(sessionStatsRef.current)
   }, [statsKey, onSessionStatsChange])
-  useEffect(
-    () => () => {
-      onSessionStatsChange?.(null)
-    },
-    [onSessionStatsChange],
-  )
 
   // Push context usage up to AppShell as well.
   const ctxKey = contextUsage
@@ -362,12 +356,6 @@ export function ChatWindow({
   useEffect(() => {
     onContextUsageChange?.(contextUsageRef.current)
   }, [ctxKey, onContextUsageChange])
-  useEffect(
-    () => () => {
-      onContextUsageChange?.(null)
-    },
-    [onContextUsageChange],
-  )
 
   const weixinStatus = getWeixinStatusProjection(extensionStatuses)
   const publishedWeixinStatusRef = useRef<WeixinStatusProjection | undefined>(undefined)

@@ -41,6 +41,7 @@ export function AppShell() {
   // Persisted session identity comes only from the URL. This epoch distinguishes
   // consecutive unpersisted drafts that intentionally share the same cwd.
   const [draftEpoch, setDraftEpoch] = useState(0)
+  const sessionProjectionOwner = selectedSession === null ? `draft:${draftEpoch}` : `session:${selectedSession.id}`
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0)
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0)
   const [modelsConfigOpen, setModelsConfigOpen] = useState(false)
@@ -126,6 +127,11 @@ export function AppShell() {
     },
     [],
   )
+  useEffect(() => {
+    setSessionStats(null)
+    setContextUsage(null)
+    setWeixinBindings([])
+  }, [sessionProjectionOwner])
 
   // Single active panel — only one dropdown open at a time
   const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "session" | null>(null)
