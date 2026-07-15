@@ -52,11 +52,6 @@
   ],
   "hostTooling": [
     {
-      "path": ".worktrees/**",
-      "owner": "@git-worktrees",
-      "reason": "nested Git worktrees are independent checkouts and are scanned from their own roots"
-    },
-    {
       "path": "scripts/**/*.mjs",
       "owner": "@release-tooling",
       "reason": "package acceptance tooling runs outside the application Effect runtime"
