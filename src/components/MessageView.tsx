@@ -3,6 +3,7 @@ import { Clock, DateTime, Effect, Option } from "effect"
 import { MarkdownBody } from "./MarkdownBody"
 import { copyText } from "@/lib/clipboard"
 import { parseCompactionSummary } from "@/lib/compaction-summary"
+import { elapsedDuration, formatDuration } from "@/lib/duration"
 import { isEmptyThinkingBlock, type TurnUsage } from "@/lib/message-display"
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch"
 import { useI18n } from "@/lib/i18n"
@@ -787,7 +788,9 @@ function AssistantMessageView({
         {turnUsage && !isStreaming ? (
           <TurnUsageSummary usage={turnUsage} />
         ) : message.usage && !isStreaming && !hideUsage ? (
-          <div style={{ fontSize: 11, color: "var(--text-dim)" }}>{formatUsage(message.usage)}</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+            {formatUsage(message.usage, elapsedDuration(prevTimestamp, message.timestamp))}
+          </div>
         ) : null}
         {textContent && !isStreaming && (
           <button
@@ -1771,7 +1774,11 @@ export function TurnUsageSummary({ usage, ongoing = false }: { usage: TurnUsage;
     ...(usage.cacheWrite > 0 ? [[t("Cache Write"), usage.cacheWrite.toLocaleString()] as [string, string]] : []),
     [t("Billed tokens"), usage.totalTokens.toLocaleString()],
     [t("Total cost"), `$${usage.cost.toFixed(6)}`],
+    ...(usage.durationMs !== null ? [[t("Duration"), formatDuration(usage.durationMs)] as [string, string]] : []),
     ...(usage.lastCallCost !== null ? [[t("Last call"), `$${usage.lastCallCost.toFixed(6)}`] as [string, string]] : []),
+    ...(usage.lastCallDurationMs !== null
+      ? [[t("Last call duration"), formatDuration(usage.lastCallDurationMs)] as [string, string]]
+      : []),
   ]
 
   return (
@@ -1792,6 +1799,12 @@ export function TurnUsageSummary({ usage, ongoing = false }: { usage: TurnUsage;
         <span>{ongoing ? t("Turn in progress") : t("This turn")}</span>
         <span>·</span>
         <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>${usage.cost.toFixed(4)}</span>
+        {!ongoing && usage.durationMs !== null && (
+          <>
+            <span>·</span>
+            <span>{formatDuration(usage.durationMs)}</span>
+          </>
+        )}
         {!ongoing && (
           <>
             <span>·</span>
@@ -1827,17 +1840,21 @@ export function TurnUsageSummary({ usage, ongoing = false }: { usage: TurnUsage;
   )
 }
 
-function formatUsage(usage: {
-  input: number
-  output: number
-  cacheRead: number
-  cacheWrite: number
-  cost: { total: number }
-}): string {
+function formatUsage(
+  usage: {
+    input: number
+    output: number
+    cacheRead: number
+    cacheWrite: number
+    cost: { total: number }
+  },
+  durationMs: number | null,
+): string {
   const parts = []
   if (usage.input) parts.push(`${usage.input.toLocaleString()} in`)
   if (usage.output) parts.push(`${usage.output.toLocaleString()} out`)
   if (usage.cacheRead) parts.push(`${usage.cacheRead.toLocaleString()} cache`)
   if (usage.cost?.total) parts.push(`$${usage.cost.total.toFixed(4)}`)
+  if (durationMs !== null) parts.push(formatDuration(durationMs))
   return parts.join(" · ")
 }

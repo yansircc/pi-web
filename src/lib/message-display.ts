@@ -5,6 +5,7 @@ import type {
   ThinkingContent,
   ToolCallContent,
 } from "@/api/contract"
+import { elapsedDuration } from "./duration"
 
 interface DisplayOptions {
   isStreaming?: boolean
@@ -19,6 +20,8 @@ export interface TurnUsage {
   totalTokens: number
   cost: number
   lastCallCost: number | null
+  durationMs: number | null
+  lastCallDurationMs: number | null
 }
 
 export function summarizeTurnUsage(messages: AgentMessage[], userIndex: number, endIndex: number): TurnUsage | null {
@@ -31,26 +34,36 @@ export function summarizeTurnUsage(messages: AgentMessage[], userIndex: number, 
     totalTokens: 0,
     cost: 0,
     lastCallCost: null,
+    durationMs: null,
+    lastCallDurationMs: null,
   }
   let usageRecords = 0
+  const turnStartedAt = messages[userIndex]?.timestamp
+  let previousTimestamp = turnStartedAt
+  let turnEndedAt: number | undefined
 
   for (let index = userIndex + 1; index < endIndex; index++) {
     const message = messages[index]
-    if (message?.role !== "assistant") continue
-    usage.modelCalls += 1
-    usage.lastCallCost = message.usage?.cost?.total ?? null
-    if (!message.usage) continue
-
-    usageRecords += 1
-    usage.input += message.usage.input ?? 0
-    usage.output += message.usage.output ?? 0
-    usage.cacheRead += message.usage.cacheRead ?? 0
-    usage.cacheWrite += message.usage.cacheWrite ?? 0
-    usage.cost += message.usage.cost?.total ?? 0
+    if (message?.role === "assistant") {
+      usage.modelCalls += 1
+      usage.lastCallCost = message.usage?.cost?.total ?? null
+      usage.lastCallDurationMs = elapsedDuration(previousTimestamp, message.timestamp)
+      if (message.timestamp !== undefined) turnEndedAt = message.timestamp
+      if (message.usage) {
+        usageRecords += 1
+        usage.input += message.usage.input ?? 0
+        usage.output += message.usage.output ?? 0
+        usage.cacheRead += message.usage.cacheRead ?? 0
+        usage.cacheWrite += message.usage.cacheWrite ?? 0
+        usage.cost += message.usage.cost?.total ?? 0
+      }
+    }
+    if (message?.timestamp !== undefined) previousTimestamp = message.timestamp
   }
 
   if (usageRecords === 0) return null
   usage.totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite
+  usage.durationMs = elapsedDuration(turnStartedAt, turnEndedAt)
   return usage
 }
 

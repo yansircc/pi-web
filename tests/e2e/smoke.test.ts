@@ -368,6 +368,10 @@ test("runs and aborts a second shell operation through the React controller", as
   const sessionId = "00000000-0000-4000-8000-000000000001"
   await page.goto(`/?session=${sessionId}`)
   await expect(page.getByText("seed reply", { exact: true })).toBeVisible()
+  const turnSummary = page.locator("summary").filter({ hasText: "本轮" })
+  await expect(turnSummary.getByText("1ms", { exact: true })).toBeVisible()
+  await turnSummary.click()
+  await expect(page.getByText("最后一次耗时", { exact: true })).toBeVisible()
 
   const prior = await mutate(page, `/api/sessions/${sessionId}/actions/bash`, {
     id: "prior-api-run",

@@ -119,9 +119,10 @@ test("keeps deferred historical thinking placeholders", () => {
 
 test("sums every assistant call within one user turn", () => {
   const messages: AgentMessage[] = [
-    { role: "user", content: "Investigate this site" },
+    { role: "user", content: "Investigate this site", timestamp: 1_000 },
     {
       ...assistant([{ type: "toolCall", toolCallId: "call-1", toolName: "browser", input: {} }]),
+      timestamp: 2_500,
       usage: {
         input: 100,
         output: 20,
@@ -130,9 +131,10 @@ test("sums every assistant call within one user turn", () => {
         cost: { input: 0.05, output: 0.05, cacheRead: 0.1, cacheWrite: 0.05, total: 0.25 },
       },
     },
-    { role: "toolResult", toolCallId: "call-1", content: [] },
+    { role: "toolResult", toolCallId: "call-1", content: [], timestamp: 5_000 },
     {
       ...assistant([{ type: "text", text: "Final answer" }]),
+      timestamp: 7_250,
       usage: {
         input: 50,
         output: 30,
@@ -163,6 +165,8 @@ test("sums every assistant call within one user turn", () => {
     totalTokens: 910,
     cost: 1,
     lastCallCost: 0.75,
+    durationMs: 6_250,
+    lastCallDurationMs: 2_250,
   })
 })
 

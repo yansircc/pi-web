@@ -151,6 +151,8 @@ const zhCN: Record<string, string> = {
   "Change reasoning level": "更改推理级别",
   "Change tool preset": "更改工具预设",
   Browser: "浏览器",
+  Duration: "耗时",
+  "Last call duration": "最后一次耗时",
   "Browser control": "浏览器控制",
   "Weixin connected": "微信已连接",
   "Weixin disconnected": "微信未连接",
