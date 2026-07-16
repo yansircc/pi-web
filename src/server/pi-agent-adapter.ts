@@ -1987,9 +1987,11 @@ const adapterLive = Effect.gen(function* () {
       const packageName = typeof parsed.value.name === "string" ? parsed.value.name : undefined
       const version = typeof parsed.value.version === "string" ? parsed.value.version : undefined
       let chromeExtensionId: string | undefined
+      let chromeExtensionDirectory: string | undefined
       if (packageName === PI_COMPANION_PACKAGE_NAMES.chrome) {
+        chromeExtensionDirectory = path.join(root, "dist", "browser-extension")
         const manifest = yield* fs
-          .readFileString(path.join(root, "dist", "browser-extension", "manifest.json"))
+          .readFileString(path.join(chromeExtensionDirectory, "manifest.json"))
           .pipe(Effect.option)
         if (Option.isSome(manifest)) {
           const keyOption = yield* Effect.try({
@@ -2016,6 +2018,7 @@ const adapterLive = Effect.gen(function* () {
         ...(packageName === undefined ? {} : { packageName }),
         ...(version === undefined ? {} : { version }),
         ...(chromeExtensionId === undefined ? {} : { chromeExtensionId }),
+        ...(chromeExtensionDirectory === undefined ? {} : { chromeExtensionDirectory }),
       }
     })
 

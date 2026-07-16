@@ -21,7 +21,7 @@ import { useI18n } from "@/lib/i18n"
 import { parseBashCommand } from "@/lib/bash-command"
 import { DEFAULT_TOOL_PRESET, type ToolPreset } from "@/lib/tool-presets"
 import type { SameProfileChromeConnection } from "@/lib/chrome-control"
-import { projectChromeWebStatus } from "@/lib/extension-status"
+import { firstUnsatisfiedChromeRequirement } from "@/lib/chrome-requirements"
 import type { ChromeStatusProjection } from "@/api/contract"
 import { withApi, runApi, runBrowser } from "@/browser/api-client"
 import { BrowserPlatform } from "@/browser/browser-platform"
@@ -75,6 +75,9 @@ interface Props {
   browserControlPending?: boolean
   browserControlStatus?: ChromeStatusProjection
   browserControlProfile?: SameProfileChromeConnection | null
+  browserControlPackageLoaded?: boolean | null
+  browserControlExtensionId?: string | null
+  browserControlExtensionDirectory?: string | null
   onBrowserControlChange?: (enabled: boolean) => void
   thinkingLevel?: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
   onThinkingLevelChange?: (level: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") => void
@@ -245,6 +248,9 @@ function BrowserControl({
   disabled,
   status,
   profile,
+  packageLoaded,
+  extensionId,
+  extensionDirectory,
   showLabel,
   onChange,
 }: {
@@ -253,6 +259,9 @@ function BrowserControl({
   disabled: boolean
   status?: ChromeStatusProjection
   profile: SameProfileChromeConnection | null
+  packageLoaded: boolean | null
+  extensionId: string | null
+  extensionDirectory: string | null
   showLabel: boolean
   onChange: (enabled: boolean) => void
 }) {
@@ -260,8 +269,14 @@ function BrowserControl({
   const [open, setOpen] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const rootRef = useRef<HTMLDivElement>(null)
-  const webStatus = status ? projectChromeWebStatus(status, profile) : null
-  const expiresAt = webStatus && typeof webStatus.authorization === "object" ? webStatus.authorization.expiresAt : null
+  const firstRequirement = firstUnsatisfiedChromeRequirement({
+    packageLoaded,
+    extensionReachable: profile === null ? null : profile.connected,
+    extensionId,
+    extensionDirectory,
+    status,
+  })
+  const expiresAt = status && typeof status.authorization === "object" ? status.authorization.expiresAt : null
 
   useEffect(() => {
     if (!open) return
@@ -289,41 +304,102 @@ function BrowserControl({
   const remainingMinutes =
     expiresAt === null ? null : currentTime === 0 ? null : Math.max(0, Math.ceil((expiresAt - currentTime) / 60_000))
   const visual =
-    webStatus?.readiness === "ready"
+    firstRequirement === undefined && status?.readiness === "ready"
       ? { color: "#22a06b", label: t("Chrome available") }
-      : webStatus?.readiness === "offline"
-        ? { color: "#d49a00", label: t("Chrome not connected") }
-        : webStatus?.readiness === "locked"
-          ? { color: "var(--text-dim)", label: t("Chrome not authorized") }
-          : webStatus?.readiness === "error"
-            ? { color: "#d14343", label: t("Chrome error") }
-            : { color: "var(--text-dim)", label: t("Unknown") }
+      : firstRequirement?.requirement === "PackageLoaded"
+        ? { color: "#d14343", label: locale === "zh-CN" ? "未安装 Pi Chrome package" : "Pi Chrome package not loaded" }
+        : firstRequirement?.requirement === "ExtensionReachable"
+          ? { color: "#d49a00", label: locale === "zh-CN" ? "当前 Chrome 未加载扩展" : "Extension not reachable" }
+          : firstRequirement?.requirement === "ProtocolCompatible"
+            ? { color: "#d14343", label: locale === "zh-CN" ? "扩展与 package 不兼容" : "Extension/package mismatch" }
+            : status?.readiness === "offline"
+              ? { color: "#d49a00", label: t("Chrome not connected") }
+              : status?.readiness === "locked"
+                ? { color: "var(--text-dim)", label: t("Chrome not authorized") }
+                : status?.readiness === "error"
+                  ? { color: "#d14343", label: t("Chrome error") }
+                  : { color: "var(--text-dim)", label: t("Unknown") }
   const authorization =
-    webStatus?.authorization === "indefinite"
+    status?.authorization === "indefinite"
       ? t("Continuous authorization")
-      : webStatus?.authorization === "locked"
+      : status?.authorization === "locked"
         ? t("Not authorized")
-        : webStatus && remainingMinutes !== null
+        : status && remainingMinutes !== null
           ? locale === "zh-CN"
             ? `剩余 ${remainingMinutes} 分钟`
             : `${remainingMinutes} min remaining`
           : t("Unknown")
   const connection =
-    webStatus?.connection === "connected"
+    status?.connection === "connected"
       ? t("Connected")
-      : webStatus?.connection === "unpaired"
+      : status?.connection === "unpaired"
         ? t("Not paired")
-        : webStatus?.connection === "offline" || webStatus?.connection === "unavailable"
+        : status?.connection === "offline" || status?.connection === "unavailable"
           ? t("Not connected")
           : t("Unknown")
   const bridge =
-    webStatus?.bridge === "running"
+    status?.bridge === "running"
       ? t("Running normally")
-      : webStatus?.bridge === "stopped"
+      : status?.bridge === "stopped"
         ? t("Stopped")
-        : webStatus?.bridge === "error"
+        : status?.bridge === "error"
           ? t("Error")
           : t("Unknown")
+  const remediation =
+    firstRequirement !== undefined && "remediation" in firstRequirement ? firstRequirement.remediation : undefined
+  const remediationText =
+    remediation?.type === "InstallPiPackage"
+      ? remediation.command
+      : remediation?.type === "OpenExtensionsPage"
+        ? [remediation.url, remediation.directory].filter(Boolean).join("\n")
+        : remediation?.type === "ReloadUnpackedExtension"
+          ? remediation.directory
+          : null
+  const remediationLabel =
+    remediation?.type === "InstallPiPackage"
+      ? locale === "zh-CN"
+        ? "复制安装命令"
+        : "Copy install command"
+      : remediation?.type === "OpenExtensionsPage" || remediation?.type === "ReloadUnpackedExtension"
+        ? locale === "zh-CN"
+          ? "复制扩展路径"
+          : "Copy extension path"
+        : remediation?.type === "OpenChromeProfile"
+          ? locale === "zh-CN"
+            ? "重试连接"
+            : "Retry connection"
+          : remediation?.type === "AuthorizeSession"
+            ? locale === "zh-CN"
+              ? "授权"
+              : "Authorize"
+            : null
+  const requirementDetail =
+    firstRequirement?.requirement === "PackageLoaded"
+      ? firstRequirement.remediation.command
+      : firstRequirement?.requirement === "ExtensionReachable"
+        ? [firstRequirement.remediation.url, firstRequirement.remediation.directory].filter(Boolean).join("\n")
+        : firstRequirement?.requirement === "ProtocolCompatible" && !firstRequirement.satisfied
+          ? locale === "zh-CN"
+            ? `Chrome 扩展与 Pi package 不兼容\nPackage ${firstRequirement.expectedVersion}，Extension ${firstRequirement.actualVersion}\n请重新加载：${firstRequirement.remediation.directory}`
+            : `Chrome extension and Pi package are incompatible\nPackage ${firstRequirement.expectedVersion}, Extension ${firstRequirement.actualVersion}\nReload: ${firstRequirement.remediation.directory}`
+          : firstRequirement?.requirement === "ConnectorLive" && !firstRequirement.satisfied
+            ? locale === "zh-CN"
+              ? `请打开对应的 Chrome profile${firstRequirement.remediation.connectorLabel ? `：${firstRequirement.remediation.connectorLabel}` : ""}`
+              : `Open the corresponding Chrome profile${firstRequirement.remediation.connectorLabel ? `: ${firstRequirement.remediation.connectorLabel}` : ""}`
+            : firstRequirement?.requirement === "Authorized" && !firstRequirement.satisfied
+              ? locale === "zh-CN"
+                ? "请授权当前会话使用浏览器控制"
+                : "Authorize browser control for this session"
+              : null
+  const runRemediation = () => {
+    if (remediationText !== null) {
+      runBrowser(BrowserPlatform.pipe(Effect.flatMap((browser) => browser.writeClipboard(remediationText))), {
+        onSuccess: () => undefined,
+      })
+      return
+    }
+    if (remediation?.type === "OpenChromeProfile" || remediation?.type === "AuthorizeSession") onChange(true)
+  }
 
   return (
     <div ref={rootRef} style={{ position: "relative" }}>
@@ -468,7 +544,7 @@ function BrowserControl({
           >
             <span style={{ color: "var(--text-dim)" }}>{t("Profile")}</span>
             <span style={{ color: "var(--text)", overflowWrap: "anywhere" }}>
-              {webStatus?.connectorLabel ?? (profile?.connected ? profile.connectorLabel : t("Not connected"))}
+              {status?.connectorLabel ?? (profile?.connected ? profile.connectorLabel : t("Not connected"))}
             </span>
             <span style={{ color: "var(--text-dim)" }}>{t("Connection")}</span>
             <span style={{ color: "var(--text)" }}>{connection}</span>
@@ -477,7 +553,43 @@ function BrowserControl({
             <span style={{ color: "var(--text-dim)" }}>{t("Bridge")}</span>
             <span style={{ color: "var(--text)" }}>{bridge}</span>
           </div>
-          {webStatus?.errorMessage && (
+          {requirementDetail !== null && (
+            <div
+              style={{
+                marginTop: 10,
+                paddingTop: 9,
+                borderTop: "1px solid var(--border)",
+                color: firstRequirement?.requirement === "ProtocolCompatible" ? "#d14343" : "var(--text-muted)",
+                fontSize: 11,
+                lineHeight: 1.5,
+                overflowWrap: "anywhere",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {requirementDetail}
+            </div>
+          )}
+          {firstRequirement !== undefined && remediationLabel !== null && (
+            <button
+              type="button"
+              onClick={runRemediation}
+              disabled={pending}
+              style={{
+                width: "100%",
+                marginTop: 10,
+                padding: "7px 9px",
+                border: "1px solid var(--border)",
+                borderRadius: 7,
+                background: "var(--bg-hover)",
+                color: "var(--text)",
+                cursor: pending ? "wait" : "pointer",
+                fontSize: 11,
+              }}
+            >
+              {remediationLabel}
+            </button>
+          )}
+          {status?.errorMessage && (
             <div
               style={{
                 marginTop: 10,
@@ -489,7 +601,7 @@ function BrowserControl({
                 overflowWrap: "anywhere",
               }}
             >
-              {webStatus.errorMessage}
+              {status.errorMessage}
             </div>
           )}
         </div>
@@ -523,6 +635,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     browserControlPending,
     browserControlStatus,
     browserControlProfile,
+    browserControlPackageLoaded,
+    browserControlExtensionId,
+    browserControlExtensionDirectory,
     onBrowserControlChange,
     thinkingLevel,
     onThinkingLevelChange,
@@ -2710,6 +2825,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
                   disabled={isStreaming}
                   status={browserControlStatus}
                   profile={browserControlProfile ?? null}
+                  packageLoaded={browserControlPackageLoaded ?? null}
+                  extensionId={browserControlExtensionId ?? null}
+                  extensionDirectory={browserControlExtensionDirectory ?? null}
                   showLabel={!isMobile || controlsMenuOpen}
                   onChange={onBrowserControlChange}
                 />

@@ -1,7 +1,6 @@
 import { Option, Schema } from "effect"
 import { ChromeStatusProjection, JsonValue, WeixinStatusProjection, type ExtensionStatusItem } from "@/api/contract"
 import { LoopStatusProjection } from "@/features/session/session-automation"
-import type { SameProfileChromeConnection } from "./chrome-control"
 
 export const decodeChromeStatusProjection = Schema.decodeUnknownOption(ChromeStatusProjection)
 export const decodeWeixinStatusProjection = Schema.decodeUnknownOption(WeixinStatusProjection)
@@ -49,39 +48,6 @@ export function sameWeixinStatusProjection(left: WeixinStatusProjection, right: 
       candidate !== undefined && candidate.accountId === binding.accountId && candidate.connected === binding.connected
     )
   })
-}
-
-export function projectChromeWebStatus(
-  status: ChromeStatusProjection,
-  profile: SameProfileChromeConnection | null,
-): ChromeStatusProjection {
-  const connection = profile?.connected ? "connected" : "offline"
-  const readiness =
-    status.readiness === "error"
-      ? "error"
-      : status.authorization === "locked"
-        ? "locked"
-        : status.bridge !== "running"
-          ? "error"
-          : connection === "connected"
-            ? "ready"
-            : "offline"
-  return {
-    kind: status.kind,
-    version: status.version,
-    readiness,
-    authorization: status.authorization,
-    connection,
-    bridge: status.bridge,
-    ...(profile?.connected
-      ? {
-          connectorId: profile.connectorId,
-          connectorLabel: profile.connectorLabel,
-        }
-      : {}),
-    ...(status.connectorExpiresAt !== undefined ? { connectorExpiresAt: status.connectorExpiresAt } : {}),
-    ...(status.errorMessage ? { errorMessage: status.errorMessage } : {}),
-  }
 }
 
 export const chromeStatusOrUndefined = (value: unknown): ChromeStatusProjection | undefined =>

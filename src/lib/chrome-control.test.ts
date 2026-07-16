@@ -7,6 +7,7 @@ import {
   attachSameProfileChromeSession,
   completeSameProfileWebRun,
   ensureChromeSessionBinding,
+  getPiChromeExtensionDirectory,
   getPiChromeExtensionId,
   getPiChromeToolState,
   getSameProfileChromeStatus,
@@ -21,6 +22,7 @@ const plugins = (
     readonly packageName?: string
     readonly status: "loaded" | "installed" | "missing" | "disabled"
     readonly chromeExtensionId?: string
+    readonly chromeExtensionDirectory?: string
   }>,
 ) => ({ packages })
 
@@ -57,10 +59,22 @@ it("detects only the loaded canonical pi-chrome package", () => {
           packageName: "@yansircc/pi-chrome",
           status: "loaded",
           chromeExtensionId: "extension-id",
+          chromeExtensionDirectory: "/npm/pi-chrome/dist/browser-extension",
         },
       ]),
     ),
   ).toBe("extension-id")
+  expect(
+    getPiChromeExtensionDirectory(
+      plugins([
+        {
+          packageName: "@yansircc/pi-chrome",
+          status: "loaded",
+          chromeExtensionDirectory: "/npm/pi-chrome/dist/browser-extension",
+        },
+      ]),
+    ),
+  ).toBe("/npm/pi-chrome/dist/browser-extension")
   expect(getPiChromeExtensionId(plugins([{ packageName: "@yansircc/pi-chrome", status: "installed" }]))).toBeNull()
 })
 
@@ -163,7 +177,7 @@ it.effect("reuses only a live route for the current browser profile", () =>
       })
     const ready = ChromeStatusProjection.make({
       kind: "pi-chrome/status",
-      version: 1,
+      version: 2,
       readiness: "ready",
       authorization: "indefinite",
       connection: "connected",
@@ -171,6 +185,7 @@ it.effect("reuses only a live route for the current browser profile", () =>
       connectorId: "connector-work",
       connectorLabel: "Work profile",
       connectorExpiresAt: Number.MAX_SAFE_INTEGER,
+      requirements: [],
     })
 
     expect(yield* ensureChromeSessionBinding("extension-id", ready, invoke)).toEqual({
@@ -213,13 +228,14 @@ it.effect("fails closed when browser authorization is near expiry", () =>
     })
     const status = ChromeStatusProjection.make({
       kind: "pi-chrome/status",
-      version: 1,
+      version: 2,
       readiness: "ready",
       authorization: { expiresAt: 0 },
       connection: "connected",
       bridge: "running",
       connectorId: "connector-work",
       connectorExpiresAt: Number.MAX_SAFE_INTEGER,
+      requirements: [],
     })
     const exit = yield* Effect.exit(ensureChromeSessionBinding("extension-id", status, () => Effect.void))
     expect(Exit.isFailure(exit)).toBe(true)

@@ -18,6 +18,7 @@ import {
   ChromeControlError,
   ensureChromeSessionBinding,
   getPiChromeExtensionId,
+  getPiChromeExtensionDirectory,
   getPiChromeToolState,
   getSameProfileChromeStatus,
   hasLoadedPiChrome,
@@ -25,6 +26,7 @@ import {
   type SameProfileChromeConnection,
 } from "@/lib/chrome-control"
 import { getChromeStatusProjection, isChromeAuthorized } from "@/lib/extension-status"
+import { chromeRequirementMessage, firstUnsatisfiedChromeRequirement } from "@/lib/chrome-requirements"
 import {
   createNotice,
   getNextAutoDismissNotice,
@@ -139,7 +141,12 @@ type ChromeDetection =
   | { readonly _tag: "Loading"; readonly cwd: string | null }
   | { readonly _tag: "Absent"; readonly cwd: string | null }
   | { readonly _tag: "Failed"; readonly cwd: string; readonly message: string }
-  | { readonly _tag: "Installed"; readonly cwd: string; readonly extensionId: string | null }
+  | {
+      readonly _tag: "Installed"
+      readonly cwd: string
+      readonly extensionId: string | null
+      readonly extensionDirectory: string | null
+    }
 
 type SelectedModel = { provider: string; modelId: string }
 type ModelEntry = { id: string; name: string; provider: string }
@@ -411,7 +418,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       onSuccess: (plugins) => {
         setChromeDetection(
           hasLoadedPiChrome(plugins)
-            ? { _tag: "Installed", cwd: modelCwd, extensionId: getPiChromeExtensionId(plugins) }
+            ? {
+                _tag: "Installed",
+                cwd: modelCwd,
+                extensionId: getPiChromeExtensionId(plugins),
+                extensionDirectory: getPiChromeExtensionDirectory(plugins),
+              }
             : { _tag: "Absent", cwd: modelCwd },
         )
       },
@@ -421,6 +433,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const chromeExtensionId =
     chromeDetection.cwd === modelCwd && chromeDetection._tag === "Installed" ? chromeDetection.extensionId : null
+  const chromeExtensionDirectory =
+    chromeDetection.cwd === modelCwd && chromeDetection._tag === "Installed" ? chromeDetection.extensionDirectory : null
   useEffect(() => {
     if (chromeExtensionId === null) {
       setChromeProfileConnection(null)
@@ -463,7 +477,27 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const chromeAuthorized = isChromeAuthorized(extensionStatuses)
   const chromeControlPending = state.chromeControlOperation !== null
   const chromeControlEnabled = isPiChromeControlEnabled(chromeAuthorized, chromeToolsActive)
-  const chromeControlInstalled = chromeDetection.cwd === modelCwd && chromeDetection._tag === "Installed"
+  const currentChromeRequirement = useCallback(
+    () =>
+      firstUnsatisfiedChromeRequirement({
+        packageLoaded:
+          chromeDetection.cwd !== modelCwd || chromeDetection._tag === "Loading" || chromeDetection._tag === "Failed"
+            ? null
+            : chromeDetection._tag === "Installed",
+        extensionReachable: chromeProfileConnection === null ? null : chromeProfileConnection.connected,
+        extensionId: chromeExtensionId,
+        extensionDirectory: chromeExtensionDirectory,
+        status: getChromeStatusProjection(extensionStatuses),
+      }),
+    [
+      chromeDetection,
+      chromeExtensionDirectory,
+      chromeExtensionId,
+      chromeProfileConnection,
+      extensionStatuses,
+      modelCwd,
+    ],
+  )
 
   const sessionStats = useMemo<SessionStatsInfo | null>(() => {
     if (sessionStatsOverride !== null) return sessionStatsOverride
@@ -507,6 +541,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const ensurePromptChromeBinding = useCallback(
     (sessionId: string) => {
+      const requirement = currentChromeRequirement()
+      if (
+        requirement?.requirement === "PackageLoaded" ||
+        requirement?.requirement === "ExtensionReachable" ||
+        requirement?.requirement === "ProtocolCompatible"
+      ) {
+        return Effect.fail(
+          new ChromeControlError({
+            operation: `binding.${requirement.requirement}`,
+            message: chromeRequirementMessage(requirement),
+          }),
+        )
+      }
       if (chromeDetection.cwd !== modelCwd || chromeDetection._tag === "Loading") {
         return Effect.fail(
           new ChromeControlError({
@@ -549,7 +596,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         Effect.asVoid,
       )
     },
-    [chromeControlEnabled, chromeDetection, extensionStatuses, modelCwd],
+    [chromeControlEnabled, chromeDetection, currentChromeRequirement, extensionStatuses, modelCwd],
   )
 
   const handleSend = useCallback(
@@ -882,6 +929,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleChromeControlChange = useCallback(
     (enabled: boolean) => {
       if (chromeControlPending) return
+      const requirement = currentChromeRequirement()
+      if (
+        enabled &&
+        (requirement?.requirement === "PackageLoaded" ||
+          requirement?.requirement === "ExtensionReachable" ||
+          requirement?.requirement === "ProtocolCompatible")
+      ) {
+        addNotice({ type: "error", message: chromeRequirementMessage(requirement) })
+        return
+      }
       const extensionId = chromeExtensionId
       if (enabled && extensionId === null) {
         addNotice({ type: "error", message: "Pi Chrome Connector is unavailable in this browser profile" })
@@ -933,7 +990,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         },
       )
     },
-    [addNotice, chromeControlPending, chromeExtensionId, ensureSession, runScoped],
+    [addNotice, chromeControlPending, chromeExtensionId, currentChromeRequirement, ensureSession, runScoped],
   )
 
   const handleLoopControl = useCallback(
@@ -1113,7 +1170,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     extensionWidgets,
     respondToExtensionUi,
     sendExtensionCustomInput,
-    chromeControlInstalled,
+    chromePackageLoaded:
+      chromeDetection.cwd !== modelCwd || chromeDetection._tag === "Loading" || chromeDetection._tag === "Failed"
+        ? null
+        : chromeDetection._tag === "Installed",
     chromeControlEnabled,
     chromeControlPending,
     chromeProfileConnection,
@@ -1145,5 +1205,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     loadTools,
     loadSlashCommands,
     chromeExtensionId,
+    chromeExtensionDirectory,
   }
 }

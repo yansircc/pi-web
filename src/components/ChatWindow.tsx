@@ -267,10 +267,12 @@ export function ChatWindow({
     extensionWidgets,
     respondToExtensionUi,
     sendExtensionCustomInput,
-    chromeControlInstalled,
+    chromePackageLoaded,
     chromeControlEnabled,
     chromeControlPending,
     chromeProfileConnection,
+    chromeExtensionId,
+    chromeExtensionDirectory,
     isAutoModelSelection,
     agentPhase,
     isNew,
@@ -429,7 +431,10 @@ export function ChatWindow({
       browserControlPending={chromeControlPending}
       browserControlStatus={chromeControlStatus}
       browserControlProfile={chromeProfileConnection}
-      onBrowserControlChange={chromeControlInstalled && (session || isNew) ? handleChromeControlChange : undefined}
+      browserControlPackageLoaded={chromePackageLoaded}
+      browserControlExtensionId={chromeExtensionId}
+      browserControlExtensionDirectory={chromeExtensionDirectory}
+      onBrowserControlChange={session || isNew ? handleChromeControlChange : undefined}
       thinkingLevel={thinkingLevel}
       onThinkingLevelChange={session || isNew ? handleThinkingLevelChange : undefined}
       availableThinkingLevels={availableThinkingLevels}

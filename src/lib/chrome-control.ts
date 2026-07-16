@@ -9,6 +9,7 @@ interface PluginsProjection {
     readonly packageName?: string
     readonly status: "loaded" | "installed" | "missing" | "disabled"
     readonly chromeExtensionId?: string
+    readonly chromeExtensionDirectory?: string
   }>
 }
 
@@ -24,6 +25,13 @@ export function getPiChromeExtensionId(plugins: PluginsProjection): string | nul
   return (
     plugins.packages.find((pkg) => pkg.packageName === PI_COMPANION_PACKAGE_NAMES.chrome && pkg.status === "loaded")
       ?.chromeExtensionId ?? null
+  )
+}
+
+export function getPiChromeExtensionDirectory(plugins: PluginsProjection): string | null {
+  return (
+    plugins.packages.find((pkg) => pkg.packageName === PI_COMPANION_PACKAGE_NAMES.chrome && pkg.status === "loaded")
+      ?.chromeExtensionDirectory ?? null
   )
 }
 
