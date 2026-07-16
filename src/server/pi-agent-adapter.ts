@@ -614,8 +614,8 @@ export const normalizePiMessage = (message: unknown): unknown => {
       }
       return {
         type: "toolCall",
-        toolCallId: typeof raw.toolCallId === "string" ? raw.toolCallId : String(raw.id ?? ""),
-        toolName: typeof raw.toolName === "string" ? raw.toolName : String(raw.name ?? ""),
+        toolCallId: typeof raw.toolCallId === "string" ? raw.toolCallId : typeof raw.id === "string" ? raw.id : "",
+        toolName: typeof raw.toolName === "string" ? raw.toolName : typeof raw.name === "string" ? raw.name : "",
         input:
           typeof raw.input === "object" && raw.input !== null
             ? raw.input
@@ -815,6 +815,15 @@ const makeRuntime = (
           }),
         )
       })
+    const runCallback = (effect: Effect.Effect<unknown, unknown>) => {
+      runFork(
+        effect.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Extension UI callback failed", { cause: Cause.pretty(cause) }),
+          ),
+        ),
+      )
+    }
 
     const publish = (event: RuntimeEventValue) => {
       PubSub.publishUnsafe(events, event)
@@ -829,6 +838,9 @@ const makeRuntime = (
 
     const emitExtensionRequest = (request: ExtensionUiRequestValue) =>
       publishForRun((runId) => RuntimeEvent.make({ _tag: "ExtensionUiRequested", runId, request }))
+
+    const emitExtensionCallback = (request: (id: string) => ExtensionUiRequestValue) =>
+      runCallback(crypto.randomUUIDv4.pipe(Effect.tap((id) => Effect.sync(() => emitExtensionRequest(request(id))))))
 
     type RequestInput = ExtensionUiRequestValue extends infer Request
       ? Request extends { readonly id: string; readonly type: "extension_ui_request" }
@@ -873,47 +885,41 @@ const makeRuntime = (
           (response) => response.value,
         ),
       notify: (message: string, notifyType?: "info" | "warning" | "error") => {
-        runPromise(crypto.randomUUIDv4).then((id) =>
-          emitExtensionRequest({
-            type: "extension_ui_request",
-            id,
-            method: "notify",
-            message,
-            ...(notifyType === undefined ? {} : { notifyType }),
-          }),
-        )
+        emitExtensionCallback((id) => ({
+          type: "extension_ui_request",
+          id,
+          method: "notify",
+          message,
+          ...(notifyType === undefined ? {} : { notifyType }),
+        }))
       },
       onTerminalInput: () => () => undefined,
       setStatus: (key: string, text?: string) => {
         if (text === undefined) statuses.delete(key)
         else statuses.set(key, { key, text })
-        runPromise(crypto.randomUUIDv4).then((id) =>
-          emitExtensionRequest({
-            type: "extension_ui_request",
-            id,
-            method: "setStatus",
-            statusKey: key,
-            ...(text === undefined ? {} : { statusText: text }),
-          }),
-        )
+        emitExtensionCallback((id) => ({
+          type: "extension_ui_request",
+          id,
+          method: "setStatus",
+          statusKey: key,
+          ...(text === undefined ? {} : { statusText: text }),
+        }))
       },
       setStructuredStatus: (key: string, value?: unknown) => {
         const status = value === undefined ? undefined : extensionStructuredStatusOrUndefined(value)
         if (value !== undefined && status === undefined) {
-          runPromise(Effect.logWarning("Ignored non-JSON extension status projection", { key }))
+          runCallback(Effect.logWarning("Ignored non-JSON extension status projection", { key }))
           return
         }
         if (status === undefined) statuses.delete(key)
         else statuses.set(key, { key, status })
-        runPromise(crypto.randomUUIDv4).then((id) =>
-          emitExtensionRequest({
-            type: "extension_ui_request",
-            id,
-            method: "setStructuredStatus",
-            statusKey: key,
-            ...(status === undefined ? {} : { status }),
-          }),
-        )
+        emitExtensionCallback((id) => ({
+          type: "extension_ui_request",
+          id,
+          method: "setStructuredStatus",
+          statusKey: key,
+          ...(status === undefined ? {} : { status }),
+        }))
       },
       setWorkingMessage: () => undefined,
       setWorkingVisible: () => undefined,
@@ -931,16 +937,14 @@ const makeRuntime = (
             content: { kind: "text", lines: [...content] },
             placement: options?.placement ?? "aboveEditor",
           })
-        runPromise(crypto.randomUUIDv4).then((id) =>
-          emitExtensionRequest({
-            type: "extension_ui_request",
-            id,
-            method: "setWidget",
-            widgetKey: key,
-            ...(content === undefined ? {} : { widgetContent: { kind: "text" as const, lines: [...content] } }),
-            ...(options?.placement === undefined ? {} : { widgetPlacement: options.placement }),
-          }),
-        )
+        emitExtensionCallback((id) => ({
+          type: "extension_ui_request",
+          id,
+          method: "setWidget",
+          widgetKey: key,
+          ...(content === undefined ? {} : { widgetContent: { kind: "text" as const, lines: [...content] } }),
+          ...(options?.placement === undefined ? {} : { widgetPlacement: options.placement }),
+        }))
       },
       setImageWidget: (
         key: string,
@@ -949,54 +953,46 @@ const makeRuntime = (
       ) => {
         const content = image === undefined ? undefined : Option.getOrUndefined(decodeExtensionImageWidget(image))
         if (image !== undefined && content === undefined) {
-          runPromise(Effect.logWarning("Ignored invalid extension image widget", { key }))
+          runCallback(Effect.logWarning("Ignored invalid extension image widget", { key }))
           return
         }
         if (content === undefined) widgets.delete(key)
         else widgets.set(key, { key, content, placement: options?.placement ?? "aboveEditor" })
-        runPromise(crypto.randomUUIDv4).then((id) =>
-          emitExtensionRequest({
-            type: "extension_ui_request",
-            id,
-            method: "setWidget",
-            widgetKey: key,
-            ...(content === undefined ? {} : { widgetContent: content }),
-            ...(options?.placement === undefined ? {} : { widgetPlacement: options.placement }),
-          }),
-        )
+        emitExtensionCallback((id) => ({
+          type: "extension_ui_request",
+          id,
+          method: "setWidget",
+          widgetKey: key,
+          ...(content === undefined ? {} : { widgetContent: content }),
+          ...(options?.placement === undefined ? {} : { widgetPlacement: options.placement }),
+        }))
       },
       setFooter: () => undefined,
       setHeader: () => undefined,
       setTitle: (title: string) => {
-        runPromise(crypto.randomUUIDv4).then((id) =>
-          emitExtensionRequest({
-            type: "extension_ui_request",
-            id,
-            method: "setTitle",
-            title,
-          }),
-        )
+        emitExtensionCallback((id) => ({
+          type: "extension_ui_request",
+          id,
+          method: "setTitle",
+          title,
+        }))
       },
       custom: () => runPromise(Effect.succeed(undefined)),
       pasteToEditor: (text: string) => {
-        runPromise(crypto.randomUUIDv4).then((id) =>
-          emitExtensionRequest({
-            type: "extension_ui_request",
-            id,
-            method: "set_editor_text",
-            text,
-          }),
-        )
+        emitExtensionCallback((id) => ({
+          type: "extension_ui_request",
+          id,
+          method: "set_editor_text",
+          text,
+        }))
       },
       setEditorText: (text: string) => {
-        runPromise(crypto.randomUUIDv4).then((id) =>
-          emitExtensionRequest({
-            type: "extension_ui_request",
-            id,
-            method: "set_editor_text",
-            text,
-          }),
-        )
+        emitExtensionCallback((id) => ({
+          type: "extension_ui_request",
+          id,
+          method: "set_editor_text",
+          text,
+        }))
       },
       getEditorText: () => "",
       addAutocompleteProvider: () => undefined,
@@ -1049,11 +1045,15 @@ const makeRuntime = (
             return RuntimeEvent.make({
               _tag: "ToolStarted",
               runId,
-              toolCallId: String(event.toolCallId ?? ""),
-              toolName: String(event.toolName ?? ""),
+              toolCallId: typeof event.toolCallId === "string" ? event.toolCallId : "",
+              toolName: typeof event.toolName === "string" ? event.toolName : "",
             })
           case "tool_execution_end":
-            return RuntimeEvent.make({ _tag: "ToolFinished", runId, toolCallId: String(event.toolCallId ?? "") })
+            return RuntimeEvent.make({
+              _tag: "ToolFinished",
+              runId,
+              toolCallId: typeof event.toolCallId === "string" ? event.toolCallId : "",
+            })
           case "queue_update":
             return RuntimeEvent.make({
               _tag: "QueueChanged",
@@ -2003,9 +2003,10 @@ const adapterLive = Effect.gen(function* () {
               const digest = yield* crypto.digest("SHA-256", decoded.success).pipe(Effect.option)
               if (Option.isSome(digest)) {
                 const alphabet = "abcdefghijklmnop"
-                chromeExtensionId = [...digest.value.slice(0, 16)]
-                  .map((byte) => `${alphabet[byte >> 4]}${alphabet[byte & 0x0f]}`)
-                  .join("")
+                chromeExtensionId = Array.from(
+                  digest.value.slice(0, 16),
+                  (byte) => `${alphabet[byte >> 4]}${alphabet[byte & 0x0f]}`,
+                ).join("")
               }
             }
           }

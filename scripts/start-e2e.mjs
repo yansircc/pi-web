@@ -179,14 +179,16 @@ const baseURL = await waitForServerUrl(server).catch((error) => {
   throw error
 })
 await waitForHealth(baseURL)
+const playwrightEnv = {
+  ...process.env,
+  ...(operatorHome === undefined ? {} : { HOME: operatorHome }),
+  ...(operatorUserProfile === undefined ? {} : { USERPROFILE: operatorUserProfile }),
+  PI_WEB_E2E_BASE_URL: baseURL,
+}
+delete playwrightEnv.FORCE_COLOR
 const playwright = spawn(process.execPath, [packageManagerEntry, "exec", "playwright", "test"], {
   cwd: root,
-  env: {
-    ...process.env,
-    ...(operatorHome === undefined ? {} : { HOME: operatorHome }),
-    ...(operatorUserProfile === undefined ? {} : { USERPROFILE: operatorUserProfile }),
-    PI_WEB_E2E_BASE_URL: baseURL,
-  },
+  env: playwrightEnv,
   stdio: "inherit",
 })
 

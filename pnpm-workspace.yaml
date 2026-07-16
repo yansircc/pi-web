@@ -6,3 +6,11 @@ overrides:
 # startTransition only from a committed effect.
 patchedDependencies:
   "@tanstack/react-router@1.170.18": patches/@tanstack__react-router@1.170.18.patch
+
+allowBuilds:
+  "@google/genai": false
+  msgpackr-extract: false
+  protobufjs: false
+
+minimumReleaseAgeExclude:
+  - "@yansircc/effect-scan"

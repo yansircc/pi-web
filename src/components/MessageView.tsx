@@ -1713,7 +1713,7 @@ function CustomMessageView({
   )
 }
 
-function getMessageText(content: CustomMessage["content"] | UserMessage["content"]): string {
+function getMessageText(content: CustomMessage["content"]): string {
   if (typeof content === "string") return content
   return content
     .filter((b): b is TextContent => b.type === "text")
@@ -1721,7 +1721,7 @@ function getMessageText(content: CustomMessage["content"] | UserMessage["content
     .join("\n")
 }
 
-function getMessageImages(content: CustomMessage["content"] | UserMessage["content"]): ImageContent[] {
+function getMessageImages(content: CustomMessage["content"]): ImageContent[] {
   if (typeof content === "string") return []
   return content.filter((b): b is ImageContent => b.type === "image")
 }
@@ -1751,14 +1751,18 @@ function getToolPreview(block: ToolCallContent): string {
   if (keys.length === 0) return ""
 
   // Common tool input patterns
-  if ("command" in input) return String(input.command).slice(0, 120)
-  if ("path" in input) return String(input.path).slice(0, 120)
-  if ("file_path" in input) return String(input.file_path).slice(0, 120)
-  if ("pattern" in input) return String(input.pattern).slice(0, 120)
-  if ("query" in input) return String(input.query).slice(0, 120)
+  if ("command" in input) return previewToolValue(input.command)
+  if ("path" in input) return previewToolValue(input.path)
+  if ("file_path" in input) return previewToolValue(input.file_path)
+  if ("pattern" in input) return previewToolValue(input.pattern)
+  if ("query" in input) return previewToolValue(input.query)
 
   const first = input[keys[0]]
-  return String(first).slice(0, 120)
+  return previewToolValue(first)
+}
+
+function previewToolValue(value: JsonValue): string {
+  return (typeof value === "string" ? value : JSON.stringify(value)).slice(0, 120)
 }
 
 export function TurnUsageSummary({ usage, ongoing = false }: { usage: TurnUsage; ongoing?: boolean }) {

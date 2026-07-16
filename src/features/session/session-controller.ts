@@ -156,7 +156,7 @@ export const sessionController = {
     withApi((api) =>
       api.sessionActions.compact({
         params: { id: sessionId },
-        payload: { ...(customInstructions === undefined ? {} : { customInstructions }) },
+        payload: customInstructions === undefined ? {} : { customInstructions },
       }),
     ),
   abortCompaction: (sessionId: string) =>

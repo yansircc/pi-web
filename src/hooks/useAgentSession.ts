@@ -77,7 +77,7 @@ export type AgentPhase =
   | null
 
 export interface CompactResultInfo {
-  reason: "manual" | "threshold" | "overflow" | "auto" | string
+  reason: string
   tokensBefore: number
   estimatedTokensAfter: number
 }

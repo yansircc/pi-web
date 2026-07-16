@@ -1362,7 +1362,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
         style={{ display: "none" }}
         onChange={(e) => {
           const files = Array.from(e.target.files ?? [])
-          void processDroppedFiles(files, [])
+          processDroppedFiles(files, [])
           e.target.value = ""
         }}
       />

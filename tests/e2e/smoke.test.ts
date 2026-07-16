@@ -13,11 +13,14 @@ const nonGitWorkspace = resolve(tmpdir(), "pi-web-e2e-non-git-workspace")
 const mutate = (page: Page, url: string, body: unknown, method: "POST" | "PATCH" | "PUT" | "DELETE" = "POST") =>
   page.evaluate(
     async ({ url, body, method }) => {
-      const response = await fetch(url, {
-        method,
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      })
+      const init = { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
+      const response = await (method === "DELETE"
+        ? fetch(url, { ...init, method: "DELETE" })
+        : method === "PATCH"
+          ? fetch(url, { ...init, method: "PATCH" })
+          : method === "PUT"
+            ? fetch(url, { ...init, method: "PUT" })
+            : fetch(url, { ...init, method: "POST" }))
       const text = await response.text()
       return { status: response.status, body: text ? JSON.parse(text) : null }
     },

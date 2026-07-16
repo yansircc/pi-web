@@ -1142,7 +1142,7 @@ export function SessionSidebar({
               <button
                 onClick={(e) => {
                   e.stopPropagation()
-                  void pickCustomPath()
+                  pickCustomPath()
                 }}
                 disabled={customPathValidating}
                 style={{
@@ -1232,7 +1232,7 @@ export function SessionSidebar({
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault()
-                      void commitCustomPath()
+                      commitCustomPath()
                     }
                     if (e.key === "Escape") {
                       setCustomPathOpen(false)
@@ -1256,7 +1256,7 @@ export function SessionSidebar({
                 />
                 <div style={{ display: "flex", gap: 5, marginTop: 5 }}>
                   <button
-                    onClick={() => void commitCustomPath()}
+                    onClick={() => commitCustomPath()}
                     disabled={customPathValidating || !customPathValue.trim()}
                     style={{
                       flex: 1,
@@ -1439,7 +1439,7 @@ export function SessionSidebar({
                               {t("Uncommitted changes. Force remove checkout?")}
                             </span>
                             <button
-                              onClick={() => void handleRemoveWorktree(wt.path, true)}
+                              onClick={() => handleRemoveWorktree(wt.path, true)}
                               disabled={wtBusy}
                               style={{
                                 padding: "3px 9px",
@@ -1526,7 +1526,7 @@ export function SessionSidebar({
                           </button>
                           {!wt.isMain && (
                             <button
-                              onClick={() => void handleRemoveWorktree(wt.path, false)}
+                              onClick={() => handleRemoveWorktree(wt.path, false)}
                               disabled={wtBusy}
                               title={`Remove worktree checkout ${wt.path}; the branch is kept`}
                               style={{
@@ -1631,7 +1631,7 @@ export function SessionSidebar({
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault()
-                            void handleCreateWorktree()
+                            handleCreateWorktree()
                           }
                           if (e.key === "Escape") {
                             setWtNewOpen(false)
@@ -1655,7 +1655,7 @@ export function SessionSidebar({
                       />
                       <div style={{ display: "flex", gap: 5, marginTop: 5 }}>
                         <button
-                          onClick={() => void handleCreateWorktree()}
+                          onClick={() => handleCreateWorktree()}
                           disabled={wtBusy || !wtNewBranch.trim()}
                           style={{
                             flex: 1,

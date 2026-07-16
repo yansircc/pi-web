@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react"
+import { Children, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react"
 import { Effect } from "effect"
 import ReactMarkdown from "react-markdown"
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
@@ -31,7 +31,9 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
         components={{
           code({ className, children, ...props }) {
             const lang = className?.replace("language-", "").toLowerCase() ?? ""
-            const raw = String(children)
+            const raw = Children.toArray(children)
+              .filter((child): child is string | number => typeof child === "string" || typeof child === "number")
+              .join("")
             const isBlock = className?.includes("language-") || raw.includes("\n")
             if (isBlock) {
               if (lang === "mermaid") {

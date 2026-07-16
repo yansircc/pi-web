@@ -9,9 +9,7 @@ overrides:
   vitest: 4.1.10
 
 patchedDependencies:
-  '@tanstack/react-router@1.170.18':
-    hash: 9206f2de68d8b5b9a53898ce806ccab7205406a4ade07ef17c47523152cb5b5b
-    path: patches/@tanstack__react-router@1.170.18.patch
+  '@tanstack/react-router@1.170.18': 9206f2de68d8b5b9a53898ce806ccab7205406a4ade07ef17c47523152cb5b5b
 
 importers:
 

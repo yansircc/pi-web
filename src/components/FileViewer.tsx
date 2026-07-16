@@ -108,7 +108,7 @@ function diffLines(oldLines: string[], newLines: string[]): DiffLine[] {
   const m = oldLines.length
   const n = newLines.length
   const max = m + n
-  const v: number[] = new Array(2 * max + 1).fill(0)
+  const v = Array.from<number>({ length: 2 * max + 1 }).fill(0)
   const trace: number[][] = []
 
   for (let d = 0; d <= max; d++) {

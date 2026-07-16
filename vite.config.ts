@@ -8,6 +8,42 @@ import pkg from "./package.json" with { type: "json" }
 
 const root = fileURLToPath(new URL(".", import.meta.url))
 
+const dependencyChunkName = (moduleId: string): string | null => {
+  const normalized = moduleId.replaceAll("\\", "/")
+  const marker = "/node_modules/"
+  const packagePath = normalized.slice(normalized.lastIndexOf(marker) + marker.length)
+  if (packagePath === normalized) return null
+  const [scopeOrName, scopedName] = packagePath.split("/")
+  const packageName = scopeOrName.startsWith("@") ? `${scopeOrName}-${scopedName}` : scopeOrName
+  return `vendor-${packageName.replaceAll(/[^a-zA-Z0-9_-]/g, "-")}`
+}
+
+const clientDependencyChunks = {
+  name: "pi-web:client-dependency-chunks",
+  configEnvironment: (_name: string, config: { consumer?: "client" | "server" }) =>
+    config.consumer === "client"
+      ? {
+          build: {
+            chunkSizeWarningLimit: 700,
+            rolldownOptions: {
+              output: {
+                codeSplitting: {
+                  groups: [
+                    {
+                      name: dependencyChunkName,
+                      test: /node_modules[\\/]/,
+                      minSize: 100 * 1024,
+                      maxSize: 450 * 1024,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }
+      : undefined,
+}
+
 export default defineConfig(({ mode }) => ({
   fmt: {
     ignorePatterns: [".output/**", "coverage/**", "scripts/release/**", "src/routeTree.gen.ts", "test-results/**"],
@@ -64,6 +100,7 @@ export default defineConfig(({ mode }) => ({
     external: ["@earendil-works/pi-ai", "@earendil-works/pi-coding-agent"],
   },
   plugins: [
+    clientDependencyChunks,
     ...(mode === "test"
       ? []
       : [

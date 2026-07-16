@@ -468,6 +468,7 @@ function ProviderDetail({
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const
 type ThinkingLevel = (typeof THINKING_LEVELS)[number]
+const OMIT_THINKING_LEVEL = Symbol("omit-thinking-level")
 
 const LEVEL_COLORS: Record<ThinkingLevel, string> = {
   off: "var(--text-dim)",
@@ -488,9 +489,9 @@ function ThinkingLevelMapEditor({
 }) {
   const map = value ?? {}
 
-  const setLevel = (level: ThinkingLevel, entry: string | null | "omit") => {
+  const setLevel = (level: ThinkingLevel, entry: string | null | typeof OMIT_THINKING_LEVEL) => {
     const next = { ...map }
-    if (entry === "omit") {
+    if (entry === OMIT_THINKING_LEVEL) {
       delete next[level]
     } else {
       next[level] = entry
@@ -576,7 +577,7 @@ function ThinkingLevelMapEditor({
               }}
             >
               <button
-                onClick={() => setLevel(level, "omit")}
+                onClick={() => setLevel(level, OMIT_THINKING_LEVEL)}
                 style={{ ...btnBase, ...(state === "omit" ? btnActive : {}) }}
               >
                 Default
@@ -655,7 +656,7 @@ function hasDeepseekCompat(model: ModelEntry): boolean {
 
 function setDeepseekCompat(model: ModelEntry, enabled: boolean): ModelEntry {
   if (enabled) {
-    return { ...model, compat: { ...(model.compat ?? {}), ...DEEPSEEK_COMPAT } }
+    return { ...model, compat: { ...model.compat, ...DEEPSEEK_COMPAT } }
   }
   if (!model.compat) return model
   const rest = { ...model.compat }

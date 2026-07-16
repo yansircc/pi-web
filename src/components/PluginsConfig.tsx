@@ -1032,7 +1032,7 @@ export function PluginsConfig({
             )}
           </div>
           <button
-            onClick={() => void loadPlugins()}
+            onClick={() => loadPlugins()}
             disabled={loading || busyKey !== null}
             style={buttonStyle(loading || busyKey !== null)}
           >
