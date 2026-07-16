@@ -45,15 +45,7 @@ export default defineConfig(({ mode }) => ({
         cache: false,
       },
       "ci:verify": {
-        command: [
-          "vp check",
-          "vp run ci:typecheck",
-          "vp test",
-          "vp run ci:effect",
-          "vp build",
-          "pnpm test:e2e",
-          "pnpm test:package",
-        ],
+        command: ["vp check", "vp run ci:typecheck", "vp test", "vp run ci:effect", "pnpm test:e2e"],
         cache: false,
       },
     },

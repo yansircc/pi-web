@@ -1,210 +1,200 @@
 import { spawn } from "node:child_process"
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises"
+import { existsSync } from "node:fs"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { createServer } from "node:net"
 import { tmpdir } from "node:os"
-import { basename, join, resolve } from "node:path"
+import { join, resolve } from "node:path"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
-import { t as listArchive } from "tar"
 
-const projectRoot = new URL("..", import.meta.url)
-const projectDirectory = fileURLToPath(projectRoot)
-const temporaryRoot = await mkdtemp(join(tmpdir(), "pi-web-package-"))
-const archiveArguments = process.argv.slice(2)
-if (archiveArguments[0] === "--") archiveArguments.shift()
-if (archiveArguments.length > 1) throw new Error("usage: test-package.mjs [archive]")
+const projectDirectory = fileURLToPath(new URL("..", import.meta.url))
+const allowedConsumers = new Set(["npm", "pnpm"])
+const allowedChecks = new Set([
+  "structure",
+  "install",
+  "bin",
+  "cli",
+  "health",
+  "page",
+  "sse",
+  "cleanup",
+  "port-release",
+])
+const options = { consumer: undefined, checks: undefined, archive: undefined }
+const argumentsList = process.argv.slice(2).filter((argument) => argument !== "--")
+for (let index = 0; index < argumentsList.length; index += 1) {
+  const argument = argumentsList[index]
+  if (argument === "--consumer" || argument === "--checks") {
+    const value = argumentsList[index + 1]
+    if (!value || value.startsWith("--")) throw new Error(`${argument} requires a value`)
+    if (argument === "--consumer") options.consumer = value
+    else options.checks = value
+    index += 1
+    continue
+  }
+  if (argument.startsWith("--")) throw new Error(`unknown option: ${argument}`)
+  if (options.archive !== undefined) throw new Error("exactly one archive path is required")
+  options.archive = argument
+}
+if (!allowedConsumers.has(options.consumer)) throw new Error("--consumer must be npm or pnpm")
+if (!options.checks) throw new Error("--checks requires a comma-separated check set")
+if (!options.archive) throw new Error("an exact archive path is required")
+const checkList = options.checks
+const checks = new Set(checkList.split(","))
+if (checks.size === 0 || [...checks].some((check) => !allowedChecks.has(check))) {
+  throw new Error("unsupported check set")
+}
+const runtimeChecks = ["bin", "cli", "health", "page", "sse", "cleanup", "port-release"]
+if (runtimeChecks.some((check) => checks.has(check)) && !checks.has("install")) {
+  throw new Error("runtime checks require install")
+}
+if (["page", "sse", "cleanup", "port-release"].some((check) => checks.has(check)) && !checks.has("health")) {
+  throw new Error("server behavior checks require health")
+}
+
+const archive = resolve(projectDirectory, options.archive)
+if (!existsSync(archive)) throw new Error(`archive does not exist: ${archive}`)
+const temporaryRoot = await mkdtemp(join(tmpdir(), "pi-web-candidate-"))
+const consumerDirectory = join(temporaryRoot, `${options.consumer}-consumer`)
 const commandExecutable = (name) =>
   process.platform === "win32" && ["npm", "npx", "pnpm"].includes(name) ? `${name}.cmd` : name
 const packageBin = (name) => (process.platform === "win32" ? `${name}.cmd` : name)
 const installTimeoutMs = 5 * 60_000
 const stopTimeoutMs = 10_000
 
-const spawnCommand = (command, args, options = {}) =>
+const spawnCommand = (command, args, spawnOptions = {}) =>
   spawn(commandExecutable(command), args, {
-    ...options,
+    ...spawnOptions,
     shell: process.platform === "win32",
   })
 
-const hasExited = (child) => child.exitCode !== null || child.signalCode !== null
-
-const waitForExit = (child, timeoutMs) => {
-  if (hasExited(child)) return Promise.resolve(true)
-  return new Promise((resolve) => {
-    let settled = false
-    const settle = (exited) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      child.off("exit", onExit)
-      resolve(exited)
-    }
-    const onExit = () => settle(true)
-    const timer = setTimeout(() => settle(false), timeoutMs)
-    child.once("exit", onExit)
-    if (hasExited(child)) settle(true)
-  })
-}
-
-const run = (command, args, options = {}) =>
-  new Promise((resolve, reject) => {
+const run = (command, args, runOptions = {}) =>
+  new Promise((resolvePromise, rejectPromise) => {
     const child = spawnCommand(command, args, {
-      cwd: options.cwd,
+      cwd: runOptions.cwd,
       detached: process.platform !== "win32",
-      env: { ...process.env, ...options.env },
-      stdio: options.stdio ?? "pipe",
+      env: { ...process.env, ...runOptions.env },
+      stdio: runOptions.stdio ?? "pipe",
     })
     let stdout = ""
     let stderr = ""
     let timedOut = false
     const timer =
-      options.timeoutMs === undefined
+      runOptions.timeoutMs === undefined
         ? undefined
         : setTimeout(() => {
             timedOut = true
             if (process.platform === "win32") {
-              const killer = spawnCommand("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
-                stdio: "ignore",
-              })
-              killer.unref()
+              spawnCommand("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" }).unref()
             } else if (child.pid !== undefined) {
               process.kill(-child.pid, "SIGKILL")
             }
-          }, options.timeoutMs)
+          }, runOptions.timeoutMs)
     child.stdout?.on("data", (chunk) => {
       stdout += chunk
     })
     child.stderr?.on("data", (chunk) => {
       stderr += chunk
     })
-    child.once("error", (error) => {
-      if (timer !== undefined) clearTimeout(timer)
-      reject(error)
-    })
+    child.once("error", rejectPromise)
     child.once("exit", (code) => {
       if (timer !== undefined) clearTimeout(timer)
-      if (timedOut) {
-        reject(new Error(`${command} ${args.join(" ")} exceeded ${options.timeoutMs}ms`))
-        return
-      }
-      if (code === 0) resolve({ stdout, stderr })
-      else reject(new Error(`${command} ${args.join(" ")} exited ${code}\n${stdout}\n${stderr}`))
+      if (timedOut) return rejectPromise(new Error(`${command} exceeded ${runOptions.timeoutMs}ms`))
+      if (code === 0) resolvePromise({ stdout, stderr })
+      else rejectPromise(new Error(`${command} ${args.join(" ")} exited ${code}\n${stdout}\n${stderr}`))
     })
   })
 
-const waitFor = async (url, child) => {
-  for (let attempt = 0; attempt < 150; attempt += 1) {
-    if (child.exitCode !== null) throw new Error(`pi-web exited before readiness: ${child.exitCode}`)
-    try {
-      const response = await fetch(`${url}/api/health`)
-      if (response.ok) return
-    } catch {
-      // The server is still starting.
+const hasExited = (child) => child.exitCode !== null || child.signalCode !== null
+const waitForExit = (child, timeoutMs) => {
+  if (hasExited(child)) return Promise.resolve(true)
+  return new Promise((resolvePromise) => {
+    const timer = setTimeout(() => {
+      child.off("exit", onExit)
+      resolvePromise(false)
+    }, timeoutMs)
+    const onExit = () => {
+      clearTimeout(timer)
+      resolvePromise(true)
     }
-    await new Promise((resolve) => setTimeout(resolve, 100))
-  }
-  throw new Error(`pi-web did not become ready at ${url}`)
+    child.once("exit", onExit)
+  })
 }
 
-const stop = async (child) => {
+const terminate = async (child) => {
   if (hasExited(child)) return
-  const gracefulExit = waitForExit(child, stopTimeoutMs)
   if (process.platform === "win32") {
-    await run("taskkill", ["/pid", String(child.pid), "/t", "/f"]).catch(() => undefined)
+    await run("taskkill", ["/pid", String(child.pid), "/t"]).catch(() => undefined)
   } else {
     child.kill("SIGTERM")
   }
-  if (await gracefulExit) return
-  const forcedExit = waitForExit(child, stopTimeoutMs)
+  if (await waitForExit(child, stopTimeoutMs)) return
   if (process.platform === "win32") {
     await run("taskkill", ["/pid", String(child.pid), "/t", "/f"]).catch(() => undefined)
   } else {
     child.kill("SIGKILL")
   }
-  if (!(await forcedExit)) throw new Error(`pi-web process ${child.pid} did not exit after forced termination`)
+  if (!(await waitForExit(child, stopTimeoutMs))) {
+    throw new Error(`pi-web process ${child.pid} did not exit`)
+  }
 }
 
-const expectCliFailure = async (directory, args) => {
-  const bin = join(directory, "node_modules", ".bin", packageBin("pi-web"))
-  const child = spawnCommand(bin, args, {
-    cwd: directory,
-    env: { ...process.env, PI_WEB_OPEN_BROWSER: "0" },
-    stdio: "pipe",
-  })
-  let output = ""
-  child.stdout.on("data", (chunk) => {
-    output += chunk
-  })
-  child.stderr.on("data", (chunk) => {
-    output += chunk
-  })
-  const code = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL")
-      reject(new Error(`invalid CLI invocation did not exit: ${args.join(" ")}`))
-    }, 5_000)
-    child.once("error", reject)
-    child.once("exit", (value) => {
-      clearTimeout(timer)
-      resolve(value)
+const allocatePort = () =>
+  new Promise((resolvePromise, rejectPromise) => {
+    const server = createServer()
+    server.once("error", rejectPromise)
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address()
+      if (address === null || typeof address === "string") {
+        server.close()
+        rejectPromise(new Error("could not allocate a loopback port"))
+        return
+      }
+      server.close((error) => (error ? rejectPromise(error) : resolvePromise(address.port)))
     })
   })
-  if (code === 0 || !output.includes("Usage: pi-web")) {
-    throw new Error(`invalid CLI invocation was not rejected: ${args.join(" ")}\n${output}`)
-  }
-}
 
-const smoke = async ({ directory, port, flags, environment = {} }) => {
-  const bin = join(directory, "node_modules", ".bin", packageBin("pi-web"))
-  const env = { ...process.env, PI_WEB_OPEN_BROWSER: "0", ...environment }
-  if (!("PORT" in environment)) delete env.PORT
-  if (!("HOST" in environment)) delete env.HOST
-  delete env.NITRO_PORT
-  delete env.NITRO_HOST
-  const child = spawnCommand(bin, flags, {
-    cwd: directory,
-    env,
-    stdio: "pipe",
-  })
-  let stderr = ""
-  let stream
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk
-  })
-  const url = `http://127.0.0.1:${port}`
-  try {
-    await waitFor(url, child)
-    const page = await fetch(url)
-    if (!page.ok || !(await page.text()).includes("Pi Agent Web")) {
-      throw new Error("packaged page smoke failed")
-    }
-    stream = await fetch(`${url}/api/sessions/running/events`)
-    if (!stream.ok || !stream.headers.get("content-type")?.includes("text/event-stream")) {
-      throw new Error("packaged SSE smoke failed")
-    }
-  } finally {
-    await stop(child)
-    await stream?.body?.cancel().catch(() => undefined)
-  }
-  if (stderr.includes("Build artifacts not found")) throw new Error(stderr)
-  if (process.platform !== "win32" && /Graceful shutdown timed out|Forcibly closing connections/.test(stderr)) {
-    throw new Error(`packaged server forced shutdown with an active SSE connection\n${stderr}`)
-  }
-}
-
-try {
-  const archiveInput = archiveArguments[0]
-  let tarball
-  if (archiveInput === undefined) {
-    const packed = await run("pnpm", ["pack", "--pack-destination", temporaryRoot], {
-      cwd: projectRoot,
+const assertPortReleased = (port) =>
+  new Promise((resolvePromise, rejectPromise) => {
+    const server = createServer()
+    server.once("error", rejectPromise)
+    server.listen(port, "127.0.0.1", () => {
+      server.close((error) => (error ? rejectPromise(error) : resolvePromise()))
     })
-    const tarballLine = packed.stdout.trim().split(/\r?\n/).at(-1)
-    if (tarballLine === undefined) throw new Error("pnpm pack did not report a tarball")
-    tarball = join(temporaryRoot, basename(tarballLine))
-  } else {
-    tarball = resolve(projectDirectory, archiveInput)
+  })
+
+const waitForHealth = async (url, child) => {
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    if (hasExited(child)) throw new Error(`pi-web exited before readiness: ${child.exitCode}`)
+    try {
+      const response = await fetch(`${url}/api/health`)
+      if (response.ok) return
+    } catch {
+      // Candidate server has not completed startup.
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100))
   }
+  throw new Error(`pi-web did not become ready at ${url}`)
+}
+
+const expectCliFailure = async (bin, args) => {
+  const result = await run(bin, args, {
+    cwd: consumerDirectory,
+    env: { PI_WEB_OPEN_BROWSER: "0" },
+    timeoutMs: 5_000,
+  }).then(
+    () => ({ accepted: true, output: "" }),
+    (error) => ({ accepted: false, output: String(error) }),
+  )
+  if (result.accepted || !result.output.includes("Usage: pi-web")) {
+    throw new Error(`invalid CLI invocation was not rejected: ${args.join(" ")}\n${result.output}`)
+  }
+}
+
+const inspectStructure = async () => {
+  const { t: listArchive } = await import("tar")
   const listing = []
-  await listArchive({ file: tarball, onReadEntry: (entry) => listing.push(entry.path) })
+  await listArchive({ file: archive, onReadEntry: (entry) => listing.push(entry.path) })
   const forbidden = listing.filter(
     (entry) =>
       entry.includes(".output/server/node_modules/") ||
@@ -216,42 +206,81 @@ try {
   if (!listing.some((entry) => entry.endsWith("/.output/server/index.mjs"))) {
     throw new Error("tarball is missing the Nitro server entry")
   }
+}
 
-  const npmDirectory = join(temporaryRoot, "npm-consumer")
-  await mkdir(npmDirectory)
-  await run("npm", ["init", "-y"], { cwd: npmDirectory })
-  await run(
-    "npm",
-    [
-      "install",
-      "--prefer-online",
-      "--fetch-retries=2",
-      "--fetch-retry-mintimeout=1000",
-      "--fetch-retry-maxtimeout=5000",
-      "--fetch-timeout=30000",
-      tarball,
-    ],
-    { cwd: npmDirectory, timeoutMs: installTimeoutMs },
+try {
+  if (checks.has("structure")) await inspectStructure()
+  await mkdir(consumerDirectory)
+  if (checks.has("install")) {
+    if (options.consumer === "npm") {
+      await run("npm", ["init", "-y"], { cwd: consumerDirectory })
+      await run(
+        "npm",
+        [
+          "install",
+          "--prefer-online",
+          "--fetch-retries=2",
+          "--fetch-retry-mintimeout=1000",
+          "--fetch-retry-maxtimeout=5000",
+          "--fetch-timeout=30000",
+          archive,
+        ],
+        { cwd: consumerDirectory, timeoutMs: installTimeoutMs },
+      )
+    } else {
+      await run("pnpm", ["init"], { cwd: consumerDirectory })
+      await run("pnpm", ["add", archive], { cwd: consumerDirectory, timeoutMs: installTimeoutMs })
+    }
+  }
+
+  const bin = join(consumerDirectory, "node_modules", ".bin", packageBin("pi-web"))
+  if (checks.has("bin") && !existsSync(bin)) throw new Error(`candidate bin is missing: ${bin}`)
+  if (checks.has("cli")) {
+    await expectCliFailure(bin, ["--port"])
+    await expectCliFailure(bin, ["--port", "0"])
+    await expectCliFailure(bin, ["--unknown"])
+  }
+  if (checks.has("health")) {
+    const port = await allocatePort()
+    const child = spawnCommand(bin, ["-p", String(port), "-H", "127.0.0.1"], {
+      cwd: consumerDirectory,
+      env: { ...process.env, PI_WEB_OPEN_BROWSER: "0" },
+      stdio: "pipe",
+    })
+    let stderr = ""
+    let stream
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk
+    })
+    const url = `http://127.0.0.1:${port}`
+    try {
+      await waitForHealth(url, child)
+      if (checks.has("page")) {
+        const response = await fetch(url)
+        if (!response.ok || !(await response.text()).includes("Pi Agent Web")) {
+          throw new Error("candidate page smoke failed")
+        }
+      }
+      if (checks.has("sse")) {
+        stream = await fetch(`${url}/api/sessions/running/events`)
+        if (!stream.ok || !stream.headers.get("content-type")?.includes("text/event-stream")) {
+          throw new Error("candidate SSE smoke failed")
+        }
+      }
+    } finally {
+      await terminate(child)
+      await stream?.body?.cancel().catch(() => undefined)
+    }
+    if (checks.has("cleanup") && !hasExited(child)) throw new Error("candidate process remained live")
+    if (checks.has("port-release")) await assertPortReleased(port)
+    if (stderr.includes("Build artifacts not found")) throw new Error(stderr)
+    if (process.platform !== "win32" && /Graceful shutdown timed out|Forcibly closing connections/.test(stderr)) {
+      throw new Error(`candidate server forced shutdown with an active connection\n${stderr}`)
+    }
+  }
+  process.stdout.write(
+    `${JSON.stringify({ candidate: true, platform: process.platform, consumer: options.consumer, checks: [...checks] })}\n`,
   )
-  await smoke({ directory: npmDirectory, port: 30241, flags: ["-p", "30241", "-H", "127.0.0.1"] })
-
-  const pnpmDirectory = join(temporaryRoot, "pnpm-consumer")
-  await mkdir(pnpmDirectory)
-  await run("pnpm", ["init"], { cwd: pnpmDirectory })
-  await run("pnpm", ["add", tarball], { cwd: pnpmDirectory, timeoutMs: installTimeoutMs })
-  await expectCliFailure(pnpmDirectory, ["--port"])
-  await expectCliFailure(pnpmDirectory, ["--port", "0"])
-  await expectCliFailure(pnpmDirectory, ["--unknown"])
-  await smoke({
-    directory: pnpmDirectory,
-    port: 30242,
-    flags: [],
-    environment: { PORT: "30242", HOST: "127.0.0.1" },
-  })
-  await smoke({ directory: pnpmDirectory, port: 30141, flags: [] })
-
-  const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"))
-  console.log(`package smoke passed for ${manifest.name}@${manifest.version}`)
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }
