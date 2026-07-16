@@ -39,7 +39,7 @@
     "lint": "vp lint",
     "format": "vp fmt",
     "test": "vp test",
-    "test:e2e": "playwright install --with-deps chromium && playwright test",
+    "test:e2e": "playwright install --with-deps chromium && node scripts/start-e2e.mjs",
     "test:package": "node scripts/test-package.mjs",
     "effect:scan": "vp run ci:effect",
     "verify": "pnpm run check",

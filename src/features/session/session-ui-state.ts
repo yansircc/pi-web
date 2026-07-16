@@ -10,6 +10,10 @@ export type OperationKind = "prompt" | "bash" | "compaction"
 export interface SessionUiState {
   readonly sessionId: string | null
   readonly draftEpoch: number | null
+  readonly chromeControlOperation: {
+    readonly requestId: string
+    readonly enabled: boolean
+  } | null
   readonly contextRequestId: number
   readonly snapshot: SessionSnapshot | null
   readonly messages: ReadonlyArray<AgentMessage>
@@ -53,6 +57,7 @@ export interface SessionUiState {
 export const initialSessionUiState: SessionUiState = {
   sessionId: null,
   draftEpoch: null,
+  chromeControlOperation: null,
   contextRequestId: 0,
   snapshot: null,
   messages: [],
@@ -105,6 +110,13 @@ export type SessionUiAction =
     }
   | { readonly _tag: "PromptSubmitted"; readonly requestId: string; readonly message: UserMessage }
   | { readonly _tag: "ExtensionStatusesChanged"; readonly statuses: ReadonlyArray<ExtensionStatusItemValue> }
+  | { readonly _tag: "ChromeControlRequested"; readonly requestId: string; readonly enabled: boolean }
+  | {
+      readonly _tag: "ChromeControlSucceeded"
+      readonly requestId: string
+      readonly statuses: ReadonlyArray<ExtensionStatusItemValue>
+    }
+  | { readonly _tag: "ChromeControlFailed"; readonly requestId: string }
   | { readonly _tag: "RuntimeEvent"; readonly sessionId: string; readonly event: RuntimeEvent }
   | { readonly _tag: "BindSession"; readonly sessionId: string }
   | { readonly _tag: "Reset"; readonly sessionId: string }
@@ -120,6 +132,16 @@ const appendEphemeral = (
 
 const promptReceipt = (pendingPrompt: SessionUiState["pendingPrompt"], context: SessionSnapshot["context"]) =>
   pendingPrompt === null ? undefined : context.promptRequests.find((item) => item.requestId === pendingPrompt.requestId)
+
+export const projectSessionEffectOwner = (
+  state: Pick<SessionUiState, "sessionId" | "draftEpoch">,
+  active: { readonly sessionId: string | null; readonly draftEpoch: number },
+): string => {
+  const materializedDraft =
+    state.draftEpoch !== null && state.sessionId !== null && state.sessionId === active.sessionId
+  if (materializedDraft) return `draft:${state.draftEpoch}`
+  return active.sessionId === null ? `draft:${active.draftEpoch}` : `session:${active.sessionId}`
+}
 
 const activeRunId = (state: SessionUiState): string | null => {
   if (state.pendingPrompt !== null) return state.pendingPrompt.runId
@@ -204,6 +226,21 @@ export const sessionUiReducer = (state: SessionUiState, action: SessionUiAction)
       return action.sessionId === state.sessionId ? { ...state, error: action.message } : state
     case "ExtensionStatusesChanged":
       return { ...state, extensionStatuses: action.statuses }
+    case "ChromeControlRequested":
+      return state.chromeControlOperation === null
+        ? {
+            ...state,
+            chromeControlOperation: { requestId: action.requestId, enabled: action.enabled },
+          }
+        : state
+    case "ChromeControlSucceeded":
+      return state.chromeControlOperation?.requestId === action.requestId
+        ? { ...state, chromeControlOperation: null, extensionStatuses: action.statuses }
+        : state
+    case "ChromeControlFailed":
+      return state.chromeControlOperation?.requestId === action.requestId
+        ? { ...state, chromeControlOperation: null }
+        : state
     case "Loaded":
       if (action.sessionId !== state.sessionId || action.snapshot.sessionId !== action.sessionId) return state
       const loadedReceipt = promptReceipt(state.pendingPrompt, action.snapshot.context)

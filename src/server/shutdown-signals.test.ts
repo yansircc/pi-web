@@ -1,8 +1,8 @@
 import { EventEmitter } from "node:events"
 import { describe, expect, it, vi } from "vite-plus/test"
-import { registerShutdownSignals } from "./nitro-lifecycle"
+import { registerShutdownSignals } from "./shutdown-signals"
 
-describe("Nitro lifecycle", () => {
+describe("shutdown signals", () => {
   it("does not become the terminal signal owner", () => {
     const target = new EventEmitter()
     const dispose = vi.fn(async () => undefined)

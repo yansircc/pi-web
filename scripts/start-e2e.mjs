@@ -1,23 +1,78 @@
 import { spawn } from "node:child_process"
 import { mkdir, rm, writeFile } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import process from "node:process"
 
 const root = fileURLToPath(new URL("..", import.meta.url))
 const fixtureRoot = join(root, "test-results", "e2e-fixture")
 const home = join(fixtureRoot, "home")
 const workspace = join(fixtureRoot, "workspace")
+const operatorHome = process.env.HOME
+const operatorUserProfile = process.env.USERPROFILE
 const packageManagerEntry = process.env.npm_execpath
 if (!packageManagerEntry) throw new Error("start-e2e must run through the repository package manager")
-const port = process.env.PI_WEB_E2E_PORT ?? "30141"
+const requestedPort = Number(process.env.PI_WEB_E2E_PORT ?? "30141")
+if (!Number.isSafeInteger(requestedPort) || requestedPort < 1 || requestedPort > 65_535) {
+  throw new Error("PI_WEB_E2E_PORT must be an integer between 1 and 65535")
+}
 const extensionPath = process.env.PI_WEB_E2E_EXTENSION_PATH
+const vitePackageDirectory = dirname(fileURLToPath(import.meta.resolve("vite/package.json")))
+const viteCli = join(vitePackageDirectory, "dist", "vite", "node", "cli.js")
 
 const run = (command, args) =>
   new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd: workspace, stdio: "inherit" })
     child.once("error", reject)
     child.once("exit", (code) => (code === 0 ? resolve() : reject(new Error(`${command} exited ${code}`))))
+  })
+
+const waitForHealth = async (url) => {
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${url}/api/health`)
+      if (response.ok) return
+    } catch {
+      // The server has bound its socket but the application graph is not ready yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error(`E2E server did not become healthy at ${url}`)
+}
+
+const waitForServerUrl = (server) =>
+  new Promise((resolve, reject) => {
+    let output = ""
+    let settled = false
+    const timeout = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new Error("E2E server did not report its bound URL"))
+    }, 30_000)
+    server.stdout.on("data", (chunk) => {
+      process.stdout.write(chunk)
+      if (settled) return
+      output = `${output}${chunk}`.slice(-8_192)
+      const match = output.match(/http:\/\/127\.0\.0\.1:(\d+)/)
+      if (!match) return
+      settled = true
+      clearTimeout(timeout)
+      resolve(`http://127.0.0.1:${match[1]}`)
+    })
+    server.stderr.on("data", (chunk) => process.stderr.write(chunk))
+    server.once("error", (error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      reject(error)
+    })
+    server.once("exit", (code) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      reject(new Error(`E2E server exited before reporting its URL (${code ?? 1})`))
+    })
   })
 
 await rm(fixtureRoot, { recursive: true, force: true })
@@ -110,30 +165,52 @@ await run("git", [
   "test: initialize fixture",
 ])
 
-const server = spawn(
-  process.execPath,
-  [packageManagerEntry, "exec", "vp", "dev", "--host", "127.0.0.1", "--port", port],
-  {
-    cwd: root,
-    env: {
-      ...process.env,
-      HOME: home,
-      USERPROFILE: home,
-      PI_WEB_OPEN_BROWSER: "0",
-    },
-    stdio: "inherit",
+const server = spawn(process.execPath, [viteCli, "dev", "--host", "127.0.0.1", "--port", String(requestedPort)], {
+  cwd: root,
+  env: {
+    ...process.env,
+    PI_WEB_OPEN_BROWSER: "0",
   },
-)
+  stdio: ["ignore", "pipe", "pipe"],
+})
+const baseURL = await waitForServerUrl(server).catch((error) => {
+  if (server.exitCode === null) server.kill("SIGTERM")
+  throw error
+})
+await waitForHealth(baseURL)
+const playwright = spawn(process.execPath, [packageManagerEntry, "exec", "playwright", "test"], {
+  cwd: root,
+  env: {
+    ...process.env,
+    ...(operatorHome === undefined ? {} : { HOME: operatorHome }),
+    ...(operatorUserProfile === undefined ? {} : { USERPROFILE: operatorUserProfile }),
+    PI_WEB_E2E_BASE_URL: baseURL,
+  },
+  stdio: "inherit",
+})
 
+const forward = (signal) => {
+  if (playwright.exitCode === null) playwright.kill(signal)
+}
+let closePromise
+const closeServer = () =>
+  (closePromise ??= new Promise((resolve) => {
+    if (server.exitCode !== null) {
+      resolve()
+      return
+    }
+    server.once("exit", () => resolve())
+    server.kill("SIGTERM")
+  }))
 const stop = (signal) => {
-  if (server.exitCode === null) server.kill(signal)
+  forward(signal)
+  void closeServer()
 }
 process.once("SIGINT", () => stop("SIGINT"))
 process.once("SIGTERM", () => stop("SIGTERM"))
-server.once("error", (error) => {
-  console.error(error)
-  process.exitCode = 1
-})
-server.once("exit", (code) => {
-  process.exitCode = code ?? 1
-})
+
+const exitCode = await new Promise((resolve, reject) => {
+  playwright.once("error", reject)
+  playwright.once("exit", (code) => resolve(code ?? 1))
+}).finally(closeServer)
+process.exitCode = exitCode

@@ -7,6 +7,7 @@ import { loadSessionSnapshot, observeSession, sessionController } from "@/featur
 import { controlRequest, type LoopControlAction } from "@/features/session/session-automation"
 import {
   initialSessionUiState,
+  projectSessionEffectOwner,
   projectSessionEntryIds,
   projectSessionMessages,
   sessionUiReducer,
@@ -204,11 +205,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [sessionStatsOverride, setSessionStatsOverride] = useState<SessionStatsInfo | null>(null)
   const [chromeDetection, setChromeDetection] = useState<ChromeDetection>({ _tag: "Loading", cwd: null })
   const [chromeToolsActive, setChromeToolsActive] = useState<boolean | null>(null)
-  const [chromeControlPending, setChromeControlPending] = useState(false)
   const [chromeProfileConnection, setChromeProfileConnection] = useState<SameProfileChromeConnection | null>(null)
   const [loopControlPending, setLoopControlPending] = useState(false)
   const [noticeState, dispatchNotice] = useReducer(noticeReducer, { visible: [], pending: [] } satisfies NoticeState)
-  const effectScopeOwner = session === null ? `draft:${draftEpoch}` : `session:${session.id}`
+  const effectScopeOwner = projectSessionEffectOwner(state, { sessionId: session?.id ?? null, draftEpoch })
   const runScoped = useBrowserEffectScope(effectScopeOwner)
 
   const sessionIdRef = useRef<string | null>(session?.id ?? null)
@@ -223,6 +223,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const noticeSequenceRef = useRef(0)
   const bashSequenceRef = useRef(0)
   const contextSequenceRef = useRef(0)
+  const chromeControlSequenceRef = useRef(0)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const lastUserMsgRef = useRef<HTMLDivElement | null>(null)
@@ -460,6 +461,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const currentModel = snapshot?.context.model ?? null
   const displayModel = isNew ? (newSessionModel ?? newSessionDefaultModel) : currentModel
   const chromeAuthorized = isChromeAuthorized(extensionStatuses)
+  const chromeControlPending = state.chromeControlOperation !== null
   const chromeControlEnabled = isPiChromeControlEnabled(chromeAuthorized, chromeToolsActive)
   const chromeControlInstalled = chromeDetection.cwd === modelCwd && chromeDetection._tag === "Installed"
 
@@ -885,7 +887,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         addNotice({ type: "error", message: "Pi Chrome Connector is unavailable in this browser profile" })
         return
       }
-      setChromeControlPending(true)
+      chromeControlSequenceRef.current += 1
+      const requestId = `chrome-control-${chromeControlSequenceRef.current}`
+      dispatch({ _tag: "ChromeControlRequested", requestId, enabled })
       ensureSession(
         (sessionId) => {
           const command = (args: string) => sessionController.extensionCommand(sessionId, "chrome", args)
@@ -907,26 +911,29 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
                 )
           runScoped(operation, {
             onSuccess: ({ result, profile }) => {
-              setChromeControlPending(false)
               setChromeProfileConnection(profile)
               setChromeToolsActive(getPiChromeToolState(result.tools.map((tool) => ({ ...tool }))))
-              loadSnapshot(sessionId)
+              dispatch({
+                _tag: "ChromeControlSucceeded",
+                requestId,
+                statuses: result.extensionStatuses,
+              })
               addNotice({ type: "success", message: enabled ? "Browser control enabled" : "Browser control disabled" })
             },
             onFailure: (error) => {
-              setChromeControlPending(false)
+              dispatch({ _tag: "ChromeControlFailed", requestId })
               setChromeProfileConnection({ connected: false })
               addNotice({ type: "error", message: messageFor(error) })
             },
           })
         },
         (error) => {
-          setChromeControlPending(false)
+          dispatch({ _tag: "ChromeControlFailed", requestId })
           addNotice({ type: "error", message: messageFor(error) })
         },
       )
     },
-    [addNotice, chromeControlPending, chromeExtensionId, ensureSession, loadSnapshot, runScoped],
+    [addNotice, chromeControlPending, chromeExtensionId, ensureSession, runScoped],
   )
 
   const handleLoopControl = useCallback(

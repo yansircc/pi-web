@@ -165,6 +165,7 @@ const smoke = async ({ directory, port, flags, environment = {} }) => {
     stdio: "pipe",
   })
   let stderr = ""
+  let stream
   child.stderr.on("data", (chunk) => {
     stderr += chunk
   })
@@ -175,15 +176,18 @@ const smoke = async ({ directory, port, flags, environment = {} }) => {
     if (!page.ok || !(await page.text()).includes("Pi Agent Web")) {
       throw new Error("packaged page smoke failed")
     }
-    const stream = await fetch(`${url}/api/sessions/running/events`)
+    stream = await fetch(`${url}/api/sessions/running/events`)
     if (!stream.ok || !stream.headers.get("content-type")?.includes("text/event-stream")) {
       throw new Error("packaged SSE smoke failed")
     }
-    await stream.body?.cancel()
   } finally {
     await stop(child)
+    await stream?.body?.cancel().catch(() => undefined)
   }
   if (stderr.includes("Build artifacts not found")) throw new Error(stderr)
+  if (process.platform !== "win32" && /Graceful shutdown timed out|Forcibly closing connections/.test(stderr)) {
+    throw new Error(`packaged server forced shutdown with an active SSE connection\n${stderr}`)
+  }
 }
 
 try {

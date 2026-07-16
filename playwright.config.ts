@@ -1,13 +1,10 @@
 import { defineConfig } from "@playwright/test"
 
-const e2ePort = Number(process.env.PI_WEB_E2E_PORT ?? "30141")
+const baseURL = process.env.PI_WEB_E2E_BASE_URL
+if (baseURL === undefined) throw new Error("Run Playwright through pnpm test:e2e so it owns an isolated server")
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  use: { baseURL: `http://127.0.0.1:${e2ePort}` },
-  webServer: {
-    command: "node scripts/start-e2e.mjs",
-    url: `http://127.0.0.1:${e2ePort}/api/health`,
-    reuseExistingServer: false,
-  },
+  outputDir: "./test-results/playwright",
+  use: { baseURL },
 })

@@ -2,6 +2,7 @@ import { expect, test } from "vite-plus/test"
 import { RunId, RuntimeSnapshot, SessionSnapshot } from "@/api/contract"
 import {
   initialSessionUiState,
+  projectSessionEffectOwner,
   projectSessionEntryIds,
   projectSessionMessages,
   sessionUiReducer,
@@ -280,6 +281,53 @@ test("uses the draft epoch only to replace consecutive unpersisted conversations
   expect(nextDraft.sessionId).toBeNull()
   expect(nextDraft.draftEpoch).toBe(2)
   expect(projectSessionMessages(nextDraft)).toEqual([])
+})
+
+test("keeps one effect owner while a draft materializes into its persisted session", () => {
+  const draft = sessionUiReducer(initialSessionUiState, { _tag: "Reset", sessionId: null, draftEpoch: 7 })
+  expect(projectSessionEffectOwner(draft, { sessionId: null, draftEpoch: 7 })).toBe("draft:7")
+
+  const bound = sessionUiReducer(draft, { _tag: "BindSession", sessionId: "session-created" })
+  expect(projectSessionEffectOwner(bound, { sessionId: null, draftEpoch: 7 })).toBe("draft:7")
+
+  const materialized = sessionUiReducer(bound, { _tag: "Reset", sessionId: "session-created" })
+  expect(materialized).toBe(bound)
+  expect(projectSessionEffectOwner(materialized, { sessionId: "session-created", draftEpoch: 7 })).toBe("draft:7")
+
+  expect(projectSessionEffectOwner(materialized, { sessionId: "session-other", draftEpoch: 7 })).toBe(
+    "session:session-other",
+  )
+})
+
+test("owns Chrome control pending state by projection and request receipt", () => {
+  const draft = sessionUiReducer(initialSessionUiState, { _tag: "Reset", sessionId: null, draftEpoch: 3 })
+  const pending = sessionUiReducer(draft, {
+    _tag: "ChromeControlRequested",
+    requestId: "chrome-1",
+    enabled: true,
+  })
+  const bound = sessionUiReducer(pending, { _tag: "BindSession", sessionId: "session-created" })
+  const materialized = sessionUiReducer(bound, { _tag: "Reset", sessionId: "session-created" })
+
+  expect(materialized).toBe(bound)
+  expect(materialized.chromeControlOperation).toEqual({ requestId: "chrome-1", enabled: true })
+  expect(sessionUiReducer(materialized, { _tag: "ChromeControlFailed", requestId: "chrome-stale" })).toBe(materialized)
+
+  const succeeded = sessionUiReducer(materialized, {
+    _tag: "ChromeControlSucceeded",
+    requestId: "chrome-1",
+    statuses: [{ key: "chrome", text: "ready" }],
+  })
+  expect(succeeded.chromeControlOperation).toBeNull()
+  expect(succeeded.extensionStatuses).toEqual([{ key: "chrome", text: "ready" }])
+
+  const nextPending = sessionUiReducer(succeeded, {
+    _tag: "ChromeControlRequested",
+    requestId: "chrome-2",
+    enabled: false,
+  })
+  const switched = sessionUiReducer(nextPending, { _tag: "Reset", sessionId: "session-other" })
+  expect(switched.chromeControlOperation).toBeNull()
 })
 
 test("only a new authoritative entry confirms a submitted prompt", () => {
