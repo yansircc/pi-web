@@ -38,6 +38,8 @@ The default address is `http://127.0.0.1:30141`. The CLI opens it after `/api/he
 
 ```bash
 pi-web -p 30200 -H 0.0.0.0
+pi-web -h
+pi-web -v
 PORT=30200 HOST=127.0.0.1 pi-web
 PI_WEB_OPEN_BROWSER=0 pi-web
 ```
@@ -49,7 +51,7 @@ pi-web has no remote authentication boundary. Binding to `0.0.0.0`, `::`, or a n
 
 ## Development
 
-This repository is owned by pnpm 10.11.0 and Vite Plus 0.2.4. Do not add another lockfile or parallel Vite/Vitest configuration.
+This repository is owned by pnpm 11.13.1 and Vite Plus 0.2.4. Do not add another lockfile or parallel Vite/Vitest configuration.
 
 ```bash
 corepack enable
@@ -64,7 +66,7 @@ pnpm test:e2e
 pnpm test:package
 ```
 
-`vp check` owns formatting and ordinary linting. The separate `ci:typecheck` task runs the TypeScript 7 compiler patched by `@effect/tsgo`, so Effect diagnostics remain part of the compiler gate. `pnpm test:e2e` creates an isolated HOME and Git fixture under ignored `test-results/`; it does not mutate the developer's real Pi state. `pnpm test:package` builds and packs the npm artifact, installs it into empty npm and pnpm consumers, starts the CLI, and checks health, page, and SSE behavior.
+`vp check` owns formatting and ordinary linting. The separate `ci:typecheck` task runs the TypeScript 7 compiler patched by `@effect/tsgo`, so Effect diagnostics remain part of the compiler gate. `pnpm test:e2e` creates an isolated HOME and Git fixture under ignored `test-results/`; it does not mutate the developer's real Pi state. `pnpm test:package` builds and packs the npm artifact, installs it into an empty consumer, verifies the packaged help/version contract, starts the CLI, and checks health, browser startup, SSE, and graceful shutdown behavior.
 
 ## Architecture
 

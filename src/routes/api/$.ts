@@ -1,42 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { Context } from "effect"
-import { disposeApi, handleApiRequest } from "@/api/server"
-import { registerShutdownSignals } from "@/server/shutdown-signals"
+import { disposeApiTerminal, handleApiTerminalRequest } from "@/server/api-terminal"
+import { registerApiTerminalDispose } from "@/server/api-terminal-lifecycle"
 
-const shutdownController = new AbortController()
-let disposePromise: Promise<void> | undefined
-
-const disposeApiTerminal = (): Promise<void> => {
-  shutdownController.abort()
-  return (disposePromise ??= disposeApi())
-}
-
-const handleRequest = (request: Request): Promise<Response> =>
-  handleApiRequest(request, Context.empty()).then((response) => {
-    if (response.body === null) return response
-    const body = response.body.pipeThrough(new TransformStream(), {
-      signal: AbortSignal.any([request.signal, shutdownController.signal]),
-    })
-    return new Response(body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
-    })
-  })
-
-const unregisterShutdownSignals = registerShutdownSignals(process, disposeApiTerminal)
+const unregisterApiTerminalDispose = registerApiTerminalDispose(disposeApiTerminal)
 
 export const Route = createFileRoute("/api/$")({
   server: {
     handlers: {
-      ANY: ({ request }) => handleRequest(request),
+      ANY: ({ request }) => handleApiTerminalRequest(request),
     },
   },
 })
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
-    unregisterShutdownSignals()
+    unregisterApiTerminalDispose()
     void disposeApiTerminal()
   })
 }

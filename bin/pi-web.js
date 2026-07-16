@@ -1,16 +1,26 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { parseArgs } from "node:util"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
 const packageDir = join(dirname(fileURLToPath(import.meta.url)), "..")
 const serverEntry = join(packageDir, ".output", "server", "index.mjs")
+const usage = `Usage: pi-web [options]
+
+Options:
+  -p, --port <port>      Port to listen on (default: 30141)
+  -H, --hostname <host>  Hostname to bind (default: 127.0.0.1)
+  -h, --help             Show this help
+  -v, --version          Show the installed version
+
+Environment:
+  PI_WEB_OPEN_BROWSER=0  Do not open a browser automatically`
 const failUsage = (message) => {
   console.error(`pi-web: ${message}`)
-  console.error("Usage: pi-web [--port <1-65535>] [--hostname <host>]")
+  console.error(usage)
   process.exit(64)
 }
 
@@ -21,12 +31,24 @@ try {
     options: {
       port: { type: "string", short: "p" },
       hostname: { type: "string", short: "H" },
+      help: { type: "boolean", short: "h" },
+      version: { type: "boolean", short: "v" },
     },
     allowPositionals: false,
     strict: true,
   }))
 } catch (error) {
   failUsage(error instanceof Error ? error.message : "invalid arguments")
+}
+
+if (values.help) {
+  console.log(usage)
+  process.exit(0)
+}
+if (values.version) {
+  const manifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"))
+  console.log(manifest.version)
+  process.exit(0)
 }
 
 if (!existsSync(serverEntry)) {

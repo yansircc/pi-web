@@ -38,6 +38,8 @@ pi-web
 
 ```bash
 pi-web -p 30200 -H 0.0.0.0
+pi-web -h
+pi-web -v
 PORT=30200 HOST=127.0.0.1 pi-web
 PI_WEB_OPEN_BROWSER=0 pi-web
 ```
@@ -49,7 +51,7 @@ pi-web 当前没有远程认证边界。监听 `0.0.0.0`、`::` 或其他非 loo
 
 ## 开发
 
-仓库只由 pnpm 10.11.0 与 Vite Plus 0.2.4 管理，不得增加第二份 lockfile 或并行的 Vite/Vitest 配置。
+仓库只由 pnpm 11.13.1 与 Vite Plus 0.2.4 管理，不得增加第二份 lockfile 或并行的 Vite/Vitest 配置。
 
 ```bash
 corepack enable
@@ -64,7 +66,7 @@ pnpm test:e2e
 pnpm test:package
 ```
 
-`vp check` 负责格式化与普通 lint；独立的 `ci:typecheck` 任务运行由 `@effect/tsgo` patch 的 TypeScript 7 编译器，Effect 诊断仍属于 compiler gate。`pnpm test:e2e` 会在已忽略的 `test-results/` 下创建隔离 HOME 和 Git fixture，不会修改开发者真实的 Pi 状态。`pnpm test:package` 会执行 build → pack，在空 npm/pnpm consumer 中安装 tarball，启动 CLI，并验证 health、页面和 SSE。
+`vp check` 负责格式化与普通 lint；独立的 `ci:typecheck` 任务运行由 `@effect/tsgo` patch 的 TypeScript 7 编译器，Effect 诊断仍属于 compiler gate。`pnpm test:e2e` 会在已忽略的 `test-results/` 下创建隔离 HOME 和 Git fixture，不会修改开发者真实的 Pi 状态。`pnpm test:package` 会执行 build → pack，在空 consumer 中安装 tarball，验证打包后的帮助/版本契约，并检查 CLI health、真实浏览器启动、SSE 与 graceful shutdown。
 
 ## 架构
 

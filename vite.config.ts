@@ -69,6 +69,7 @@ export default defineConfig(({ mode }) => ({
       : [
           tanstackStart({ spa: { enabled: true } }),
           nitro({
+            plugins: [fileURLToPath(new URL("./src/server/nitro-lifecycle.ts", import.meta.url))],
             traceDeps: ["@earendil-works/pi-coding-agent*", "@earendil-works/pi-ai*"],
           }),
         ]),

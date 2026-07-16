@@ -13,7 +13,7 @@
   ],
   "allowedAdapters": [
     {
-      "path": "src/routes/api/$.ts",
+      "path": "src/server/api-terminal.ts",
       "owner": "@http-edge",
       "reason": "single TanStack Start terminal adapter for the Effect HttpApi web handler",
       "rules": ["EFF400", "EFF402"]

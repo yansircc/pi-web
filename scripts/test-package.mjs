@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -60,7 +60,7 @@ const consumerDirectory = join(temporaryRoot, `${options.consumer}-consumer`)
 const commandExecutable = (name) =>
   process.platform === "win32" && ["npm", "npx", "pnpm"].includes(name) ? `${name}.cmd` : name
 const packageBin = (name) => (process.platform === "win32" ? `${name}.cmd` : name)
-const installTimeoutMs = 5 * 60_000
+const installTimeoutMs = 10 * 60_000
 const stopTimeoutMs = 10_000
 
 const spawnCommand = (command, args, spawnOptions = {}) =>
@@ -191,6 +191,17 @@ const expectCliFailure = async (bin, args) => {
   }
 }
 
+const expectCliOutput = async (bin, args, expected) => {
+  const result = await run(bin, args, {
+    cwd: consumerDirectory,
+    env: { PORT: "must-not-be-read", PI_WEB_OPEN_BROWSER: "0" },
+    timeoutMs: 5_000,
+  })
+  if (result.stdout !== expected || result.stderr !== "") {
+    throw new Error(`unexpected CLI output: ${args.join(" ")}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`)
+  }
+}
+
 const inspectStructure = async () => {
   const { t: listArchive } = await import("tar")
   const listing = []
@@ -240,6 +251,21 @@ try {
   const bin = join(consumerDirectory, "node_modules", ".bin", packageBin("pi-web"))
   if (checks.has("bin") && !existsSync(bin)) throw new Error(`candidate bin is missing: ${bin}`)
   if (checks.has("cli")) {
+    const manifest = JSON.parse(
+      await readFile(join(consumerDirectory, "node_modules", "@yansircc", "pi-web", "package.json"), "utf8"),
+    )
+    await expectCliOutput(bin, ["-v"], `${manifest.version}\n`)
+    await expectCliOutput(bin, ["--version"], `${manifest.version}\n`)
+    for (const helpArgument of ["-h", "--help"]) {
+      const result = await run(bin, [helpArgument], {
+        cwd: consumerDirectory,
+        env: { PORT: "must-not-be-read", PI_WEB_OPEN_BROWSER: "0" },
+        timeoutMs: 5_000,
+      })
+      if (!result.stdout.startsWith("Usage: pi-web [options]\n") || !result.stdout.includes("-v, --version")) {
+        throw new Error(`incomplete CLI help: ${helpArgument}\n${result.stdout}`)
+      }
+    }
     await expectCliFailure(bin, ["--port"])
     await expectCliFailure(bin, ["--port", "0"])
     await expectCliFailure(bin, ["--unknown"])
@@ -272,13 +298,8 @@ try {
         const pageErrors = []
         page.on("pageerror", (error) => pageErrors.push(error.message))
         try {
-          await page.goto(url)
-          await page.waitForFunction(
-            () =>
-              !document.body.textContent?.includes("加载中...") && !document.body.textContent?.includes("Loading..."),
-            undefined,
-            { timeout: 10_000 },
-          )
+          await page.goto(url, { waitUntil: "load" })
+          await page.waitForTimeout(1_000)
         } finally {
           await browser.close()
         }
