@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import process from "node:process"
+import { stripVTControlCharacters } from "node:util"
 
 const root = fileURLToPath(new URL("..", import.meta.url))
 const fixtureRoot = join(root, "test-results", "e2e-fixture")
@@ -54,7 +55,7 @@ const waitForServerUrl = (server) =>
       process.stdout.write(chunk)
       if (settled) return
       output = `${output}${chunk}`.slice(-8_192)
-      const match = output.match(/http:\/\/127\.0\.0\.1:(\d+)/)
+      const match = stripVTControlCharacters(output).match(/http:\/\/127\.0\.0\.1:(\d+)/)
       if (!match) return
       settled = true
       clearTimeout(timeout)
