@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -228,6 +228,10 @@ try {
         { cwd: consumerDirectory, timeoutMs: installTimeoutMs },
       )
     } else {
+      await writeFile(
+        join(consumerDirectory, "pnpm-workspace.yaml"),
+        'allowBuilds:\n  "@google/genai": false\n  msgpackr-extract: false\n  protobufjs: false\n',
+      )
       await run("pnpm", ["init"], { cwd: consumerDirectory })
       await run("pnpm", ["add", archive], { cwd: consumerDirectory, timeoutMs: installTimeoutMs })
     }
