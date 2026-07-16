@@ -25,7 +25,7 @@ try {
     "--consumer",
     "npm",
     "--checks",
-    "structure,install,bin,cli,health,page,sse,cleanup,port-release",
+    "structure,install,bin,cli,health,page,browser,sse,cleanup,port-release",
     join(temporary, archives[0]),
   ])
 } finally {

@@ -16,6 +16,7 @@ const allowedChecks = new Set([
   "cli",
   "health",
   "page",
+  "browser",
   "sse",
   "cleanup",
   "port-release",
@@ -44,11 +45,11 @@ const checks = new Set(checkList.split(","))
 if (checks.size === 0 || [...checks].some((check) => !allowedChecks.has(check))) {
   throw new Error("unsupported check set")
 }
-const runtimeChecks = ["bin", "cli", "health", "page", "sse", "cleanup", "port-release"]
+const runtimeChecks = ["bin", "cli", "health", "page", "browser", "sse", "cleanup", "port-release"]
 if (runtimeChecks.some((check) => checks.has(check)) && !checks.has("install")) {
   throw new Error("runtime checks require install")
 }
-if (["page", "sse", "cleanup", "port-release"].some((check) => checks.has(check)) && !checks.has("health")) {
+if (["page", "browser", "sse", "cleanup", "port-release"].some((check) => checks.has(check)) && !checks.has("health")) {
   throw new Error("server behavior checks require health")
 }
 
@@ -263,6 +264,25 @@ try {
         if (!response.ok || !(await response.text()).includes("Pi Agent Web")) {
           throw new Error("candidate page smoke failed")
         }
+      }
+      if (checks.has("browser")) {
+        const { chromium } = await import("@playwright/test")
+        const browser = await chromium.launch({ headless: true })
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on("pageerror", (error) => pageErrors.push(error.message))
+        try {
+          await page.goto(url)
+          await page.waitForFunction(
+            () =>
+              !document.body.textContent?.includes("加载中...") && !document.body.textContent?.includes("Loading..."),
+            undefined,
+            { timeout: 10_000 },
+          )
+        } finally {
+          await browser.close()
+        }
+        if (pageErrors.length > 0) throw new Error(`candidate browser errors:\n${pageErrors.join("\n")}`)
       }
       if (checks.has("sse")) {
         stream = await fetch(`${url}/api/sessions/running/events`)
