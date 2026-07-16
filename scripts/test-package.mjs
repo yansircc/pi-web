@@ -232,7 +232,7 @@ try {
         join(consumerDirectory, "pnpm-workspace.yaml"),
         'allowBuilds:\n  "@google/genai": false\n  msgpackr-extract: false\n  protobufjs: false\n',
       )
-      await run("pnpm", ["init"], { cwd: consumerDirectory })
+      await writeFile(join(consumerDirectory, "package.json"), '{"private":true}\n')
       await run("pnpm", ["add", archive], { cwd: consumerDirectory, timeoutMs: installTimeoutMs })
     }
   }
