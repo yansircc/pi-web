@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
@@ -6,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
+import spawn from "cross-spawn"
 
 const projectDirectory = fileURLToPath(new URL("..", import.meta.url))
 const allowedConsumers = new Set(["npm", "pnpm"])
@@ -65,7 +65,6 @@ const stopTimeoutMs = 10_000
 const spawnCommand = (command, args, spawnOptions = {}) =>
   spawn(commandExecutable(command), args, {
     ...spawnOptions,
-    shell: process.platform === "win32",
   })
 
 const run = (command, args, runOptions = {}) =>

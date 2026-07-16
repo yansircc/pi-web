@@ -81,6 +81,7 @@
     "@types/react-syntax-highlighter": "15.5.13",
     "@vitejs/plugin-react": "6.0.3",
     "@yansircc/effect-scan": "0.1.2",
+    "cross-spawn": "7.0.6",
     "nitro": "3.0.260610-beta",
     "tailwindcss": "4.3.2",
     "tar": "7.5.20",
